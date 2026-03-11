@@ -66,13 +66,13 @@ EXAMPLE (2 fill_in_blank contexts + 1 error_identification context):
     {
       "context_id": 3,
       "type": "error_identification",
-      "passage": "**Dans le grand pays comme le Canada (4)**, les études d'envergure nationale **peuvent masquer (5)** des différences substantielles entre les régions. En fait, **le vieillissement démographique risque d'être plus prononcé (6)** dans les provinces canadiennes les plus pauvres.",
+      "passage": "Tous les employés et employées intéressés par cette mutation doivent me le signaler avant le 15 de ce mois. Si vous **souhaitez poser (A)** votre candidature, veuillez transmettre votre curriculum vitæ **à jour (B)** au service des **resources humaines (C)**.",
       "questions": [
         {
           "question_id": 4,
-          "options": {"A": "Dans le grand pays comme le Canada", "B": "peuvent masquer", "C": "le vieillissement démographique risque d'être plus prononcé", "D": "Aucun des choix offerts."},
-          "correct_answer": "A",
-          "grammar_topic": "article"
+          "options": {"A": "souhaitez poser", "B": "à jour", "C": "resources humaines", "D": "Aucun des choix offerts."},
+          "correct_answer": "C",
+          "grammar_topic": "spelling"
         }
       ]
     }
@@ -85,7 +85,7 @@ Note how:
 - Each question has its OWN A/B/C/D options (never combined)
 - Fill-in-the-blank contexts have 1 or 2 questions each
 - Error identification contexts have exactly 1 question
-- The question number in the passage matches the question_id
+- For error_identification passages: segments are labeled (A), (B), (C) in the passage; options A/B/C contain the segment text ONLY (no letter label), D is always "Aucun des choix offerts."
 """
 
 SYSTEM_PROMPT = """You are an expert French language test designer for the Canadian federal Public Service Commission (PSC). You create questions for the Second Language Evaluation (SLE) — Test of Written Expression.
@@ -93,7 +93,7 @@ SYSTEM_PROMPT = """You are an expert French language test designer for the Canad
 You must generate exam content organized as CONTEXTS, each containing one or more QUESTIONS:
 - Each context is a workplace passage (email, memo, policy, meeting invitation, announcement)
 - Fill-in-the-blank contexts: passage with numbered blanks. Each blank is a separate question with 4 options (A/B/C/D).
-- Error identification contexts: passage with 3 bolded segments. One question per context. Options A/B/C correspond to the segments, D is always "Aucun des choix offerts."
+- Error identification contexts: passage with 3 bolded segments labeled (A), (B), (C). One question per context. Options A/B/C correspond to the labeled segments; D is always "Aucun des choix offerts."
 
 Grammar areas to test: prepositions, verb conjugation, agreement (gender/number), pronouns, conjunctions, vocabulary, relative pronouns, adverbs, tense usage, passive voice, spelling, syntax.
 
@@ -102,7 +102,7 @@ CRITICAL RULES:
 - Distractors must be plausible but clearly wrong to a proficient speaker
 - Each question tests a distinct grammar point
 - All passages use formal/professional French appropriate for government communications
-- For error_identification: the error in the bolded segment must be a real, identifiable grammatical or spelling error
+- For error_identification: the error in the bolded segment must be a real, identifiable grammatical or spelling error. Each bolded segment MUST include its letter label in parentheses at the end: e.g. **segment text (A)**, **segment text (B)**, **segment text (C)**. The options A/B/C MUST contain ONLY the segment text WITHOUT the letter label: e.g. {"A": "segment text", "B": "segment text", "C": "segment text", "D": "Aucun des choix offerts."}
 - Question numbering is CONTINUOUS across all contexts (never restart at 1)
 - Fill-in-the-blank contexts have 1 or 2 questions (blanks) each
 - Error identification contexts have exactly 1 question
@@ -117,28 +117,25 @@ def _shuffle_options(exam_data: dict):
     Randomize the position of options for each question so the correct answer
     isn't predictably in one slot. Modifies exam_data in place.
 
-    Skips error_identification questions where option D is the fixed
-    "Aucun des choix offerts." sentinel.
+    Skips error_identification questions entirely — options A/B/C correspond to
+    specific bolded passage segments so their order must be preserved, and D is
+    always the fixed "Aucun des choix offerts." sentinel.
     """
     for ctx in exam_data.get("contexts", []):
         for q in ctx.get("questions", []):
+            # Skip shuffling entirely for error_identification questions.
+            # Options A/B/C correspond to specific bolded passage segments, so
+            # their order must be preserved. D is always the "Aucun des choix offerts." sentinel.
+            if ctx["type"] == "error_identification":
+                continue
+
             opts = q.get("options", {})
             correct_letter = q["correct_answer"]
             correct_text = opts[correct_letter]
 
-            # Skip error_identification: D is always the "none of the above" sentinel
-            if ctx["type"] == "error_identification":
-                # Only shuffle A/B/C, keep D fixed
-                abc_items = [(k, opts[k]) for k in ["A", "B", "C"]]
-                random.shuffle(abc_items)
-                new_opts = {}
-                for i, (_, text) in enumerate(abc_items):
-                    new_opts[LETTERS[i]] = text
-                new_opts["D"] = opts["D"]
-            else:
-                items = list(opts.items())
-                random.shuffle(items)
-                new_opts = {LETTERS[i]: text for i, (_, text) in enumerate(items)}
+            items = list(opts.items())
+            random.shuffle(items)
+            new_opts = {LETTERS[i]: text for i, (_, text) in enumerate(items)}
 
             # Update correct_answer to the new position
             for letter, text in new_opts.items():
@@ -196,7 +193,7 @@ def generate_exam(num_questions: int) -> dict:
     client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 
     num_questions = max(5, min(40, num_questions))
-    num_fill_blank = round(num_questions * 0.75)
+    num_fill_blank = round(num_questions * 0.5)   # 50% fill-in-blank
     num_error_id = num_questions - num_fill_blank
 
     weak_areas_section = ""

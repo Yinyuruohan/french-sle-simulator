@@ -31,7 +31,7 @@ Then open the URL shown in the terminal (typically `http://localhost:8501`).
 1. **Welcome screen** — User clicks "Start a writing exam"
 2. **Setup** — User selects number of questions (5–40)
 3. **Generation** — `generate_exam()` calls DeepSeek to produce questions:
-   - ~75% fill-in-the-blank, ~25% error identification
+   - ~50% fill-in-the-blank, ~50% error identification
    - Canadian federal workplace scenarios
    - Reads `user_error_tracking.md` to bias toward weak grammar areas
    - Post-generation option shuffling (`_shuffle_options`) randomizes A/B/C/D positions so correct answers aren't predictably in one slot (error_identification option D "Aucun des choix offerts." stays fixed)

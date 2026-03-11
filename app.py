@@ -83,7 +83,7 @@ def render_setup():
         help="The official exam has 40 questions. / L'examen officiel comporte 40 questions."
     )
 
-    num_fill = round(num_questions * 0.75)
+    num_fill = round(num_questions * 0.5)
     num_err = num_questions - num_fill
 
     st.markdown(f"""
