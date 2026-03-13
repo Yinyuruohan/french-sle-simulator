@@ -2,7 +2,7 @@
 
 ## Objective
 
-Generate realistic French SLE Written Expression practice exams, administer them through a web UI, grade answers, provide grammar feedback, and track errors for adaptive learning. All content passes through an automated quality review agent before reaching the user.
+Generate realistic French SLE Written Expression practice exams, administer them through a web UI, grade answers, provide grammar feedback, and track errors for review. All content passes through an automated quality review agent before reaching the user.
 
 ## Required Inputs
 
@@ -33,7 +33,7 @@ Then open the URL shown in the terminal (typically `http://localhost:8501`).
 3. **Generation** — `generate_exam()` calls DeepSeek to produce questions:
    - ~50% fill-in-the-blank, ~50% error identification
    - Canadian federal workplace scenarios
-   - Reads `user_error_tracking.md` to bias toward weak grammar areas
+   - Grammar coverage requirements ensure broad distribution across real SLE topics (no topic repeated more than twice)
    - Post-generation option shuffling (`_shuffle_options`) randomizes A/B/C/D positions so correct answers aren't predictably in one slot (error_identification option D "Aucun des choix offerts." stays fixed)
    - Saves exam markdown to `.tmp/exam_YYYYMMDD_HHMMSS.md`
 4. **Exam quality review** — `review_exam_quality()` validates the generated exam:
@@ -72,7 +72,7 @@ The generation prompt includes:
 - Format rules: two question types, 4 options, workplace contexts
 - Few-shot examples from the official PSC test booklet (hardcoded)
 - Requested question count and type mix
-- Adaptive section: summary of past errors from tracking file
+- Grammar coverage requirements: explicit topic distribution rules ensuring variety across real SLE topics
 - JSON output format specification
 
 Temperature: 0.7 (balanced creativity for varied questions)

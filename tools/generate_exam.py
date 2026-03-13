@@ -23,7 +23,6 @@ DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-chat"
 
 TMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".tmp")
-TRACKING_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "user_error_tracking.md")
 
 # Few-shot examples using the new contexts→questions structure with A/B/C/D
 FEW_SHOT_EXAMPLES = """
@@ -146,36 +145,6 @@ def _shuffle_options(exam_data: dict):
             q["options"] = new_opts
 
 
-def _read_weak_areas():
-    """Read user_error_tracking.md and summarize weak grammar areas."""
-    if not os.path.exists(TRACKING_FILE):
-        return None
-
-    try:
-        with open(TRACKING_FILE, "r", encoding="utf-8") as f:
-            content = f.read()
-    except Exception:
-        return None
-
-    if not content.strip():
-        return None
-
-    categories = {}
-    for line in content.split("\n"):
-        if line.startswith("- **Error category:**"):
-            cat = line.replace("- **Error category:**", "").strip()
-            categories[cat] = categories.get(cat, 0) + 1
-
-    if not categories:
-        return None
-
-    sorted_cats = sorted(categories.items(), key=lambda x: x[1], reverse=True)
-    summary = "The candidate has historically struggled with these grammar areas (most frequent errors first):\n"
-    for cat, count in sorted_cats:
-        summary += f"- {cat}: {count} error(s)\n"
-
-    return summary
-
 
 def generate_exam(num_questions: int) -> dict:
     """
@@ -196,20 +165,25 @@ def generate_exam(num_questions: int) -> dict:
     num_fill_blank = round(num_questions * 0.5)   # 50% fill-in-blank
     num_error_id = num_questions - num_fill_blank
 
-    weak_areas_section = ""
-    weak_areas = _read_weak_areas()
-    if weak_areas:
-        weak_areas_section = f"""
-ADAPTIVE FOCUS:
-{weak_areas}
-Please generate MORE questions targeting these weak areas while still covering a variety of grammar topics.
-"""
-
     user_prompt = f"""Generate a French SLE Written Expression exam with exactly {num_questions} total questions:
 - {num_fill_blank} fill_in_blank questions (spread across multiple contexts, 1-2 questions per context)
 - {num_error_id} error_identification questions (1 question per context)
 
-{weak_areas_section}
+GRAMMAR COVERAGE REQUIREMENTS:
+Cover a broad range of grammar topics across all questions. Do NOT repeat the same grammar_topic more than twice. Distribute questions across these topics, prioritizing those most frequently tested on the real PSC SLE Written Expression exam:
+1. agreement (subject-verb, noun-adjective gender/number)
+2. conjugation (verb tense, mood, person)
+3. preposition
+4. vocabulary (word choice, register)
+5. tense
+6. pronoun / relative_pronoun
+7. conjunction
+8. spelling
+9. syntax
+10. adverb
+11. passive_voice
+
+Assign a distinct grammar_topic to each question and ensure no topic appears more than twice across all questions.
 
 Here is an example of the exact JSON structure to follow:
 {FEW_SHOT_EXAMPLES}
