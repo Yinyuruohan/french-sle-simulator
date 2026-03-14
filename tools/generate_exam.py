@@ -12,18 +12,14 @@ Structure: contexts[] → questions[] (each question has its own A/B/C/D choices
 import json
 import os
 import random
+import sys
 from datetime import datetime
 from openai import OpenAI
-from dotenv import load_dotenv
 
-load_dotenv()
-
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.model_config import ModelConfig, load_default_configs
 
 TMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".tmp")
-TRACKING_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "user_error_tracking.md")
 
 # Few-shot examples using the new contexts→questions structure with A/B/C/D
 FEW_SHOT_EXAMPLES = """
@@ -66,13 +62,13 @@ EXAMPLE (2 fill_in_blank contexts + 1 error_identification context):
     {
       "context_id": 3,
       "type": "error_identification",
-      "passage": "**Dans le grand pays comme le Canada (4)**, les études d'envergure nationale **peuvent masquer (5)** des différences substantielles entre les régions. En fait, **le vieillissement démographique risque d'être plus prononcé (6)** dans les provinces canadiennes les plus pauvres.",
+      "passage": "Tous les employés et employées intéressés par cette mutation doivent me le signaler avant le 15 de ce mois. Si vous **souhaitez poser (A)** votre candidature, veuillez transmettre votre curriculum vitæ **à jour (B)** au service des **resources humaines (C)**.",
       "questions": [
         {
           "question_id": 4,
-          "options": {"A": "Dans le grand pays comme le Canada", "B": "peuvent masquer", "C": "le vieillissement démographique risque d'être plus prononcé", "D": "Aucun des choix offerts."},
-          "correct_answer": "A",
-          "grammar_topic": "article"
+          "options": {"A": "souhaitez poser", "B": "à jour", "C": "resources humaines", "D": "Aucun des choix offerts."},
+          "correct_answer": "C",
+          "grammar_topic": "spelling"
         }
       ]
     }
@@ -85,7 +81,7 @@ Note how:
 - Each question has its OWN A/B/C/D options (never combined)
 - Fill-in-the-blank contexts have 1 or 2 questions each
 - Error identification contexts have exactly 1 question
-- The question number in the passage matches the question_id
+- For error_identification passages: segments are labeled (A), (B), (C) in the passage; options A/B/C contain the segment text ONLY (no letter label), D is always "Aucun des choix offerts."
 """
 
 SYSTEM_PROMPT = """You are an expert French language test designer for the Canadian federal Public Service Commission (PSC). You create questions for the Second Language Evaluation (SLE) — Test of Written Expression.
@@ -93,7 +89,7 @@ SYSTEM_PROMPT = """You are an expert French language test designer for the Canad
 You must generate exam content organized as CONTEXTS, each containing one or more QUESTIONS:
 - Each context is a workplace passage (email, memo, policy, meeting invitation, announcement)
 - Fill-in-the-blank contexts: passage with numbered blanks. Each blank is a separate question with 4 options (A/B/C/D).
-- Error identification contexts: passage with 3 bolded segments. One question per context. Options A/B/C correspond to the segments, D is always "Aucun des choix offerts."
+- Error identification contexts: passage with 3 bolded segments labeled (A), (B), (C). One question per context. Options A/B/C correspond to the labeled segments; D is always "Aucun des choix offerts."
 
 Grammar areas to test: prepositions, verb conjugation, agreement (gender/number), pronouns, conjunctions, vocabulary, relative pronouns, adverbs, tense usage, passive voice, spelling, syntax.
 
@@ -102,7 +98,7 @@ CRITICAL RULES:
 - Distractors must be plausible but clearly wrong to a proficient speaker
 - Each question tests a distinct grammar point
 - All passages use formal/professional French appropriate for government communications
-- For error_identification: the error in the bolded segment must be a real, identifiable grammatical or spelling error
+- For error_identification: the error in the bolded segment must be a real, identifiable grammatical or spelling error. Each bolded segment MUST include its letter label in parentheses at the end: e.g. **segment text (A)**, **segment text (B)**, **segment text (C)**. The options A/B/C MUST contain ONLY the segment text WITHOUT the letter label: e.g. {"A": "segment text", "B": "segment text", "C": "segment text", "D": "Aucun des choix offerts."}
 - Question numbering is CONTINUOUS across all contexts (never restart at 1)
 - Fill-in-the-blank contexts have 1 or 2 questions (blanks) each
 - Error identification contexts have exactly 1 question
@@ -117,28 +113,25 @@ def _shuffle_options(exam_data: dict):
     Randomize the position of options for each question so the correct answer
     isn't predictably in one slot. Modifies exam_data in place.
 
-    Skips error_identification questions where option D is the fixed
-    "Aucun des choix offerts." sentinel.
+    Skips error_identification questions entirely — options A/B/C correspond to
+    specific bolded passage segments so their order must be preserved, and D is
+    always the fixed "Aucun des choix offerts." sentinel.
     """
     for ctx in exam_data.get("contexts", []):
         for q in ctx.get("questions", []):
+            # Skip shuffling entirely for error_identification questions.
+            # Options A/B/C correspond to specific bolded passage segments, so
+            # their order must be preserved. D is always the "Aucun des choix offerts." sentinel.
+            if ctx["type"] == "error_identification":
+                continue
+
             opts = q.get("options", {})
             correct_letter = q["correct_answer"]
             correct_text = opts[correct_letter]
 
-            # Skip error_identification: D is always the "none of the above" sentinel
-            if ctx["type"] == "error_identification":
-                # Only shuffle A/B/C, keep D fixed
-                abc_items = [(k, opts[k]) for k in ["A", "B", "C"]]
-                random.shuffle(abc_items)
-                new_opts = {}
-                for i, (_, text) in enumerate(abc_items):
-                    new_opts[LETTERS[i]] = text
-                new_opts["D"] = opts["D"]
-            else:
-                items = list(opts.items())
-                random.shuffle(items)
-                new_opts = {LETTERS[i]: text for i, (_, text) in enumerate(items)}
+            items = list(opts.items())
+            random.shuffle(items)
+            new_opts = {LETTERS[i]: text for i, (_, text) in enumerate(items)}
 
             # Update correct_answer to the new position
             for letter, text in new_opts.items():
@@ -149,70 +142,48 @@ def _shuffle_options(exam_data: dict):
             q["options"] = new_opts
 
 
-def _read_weak_areas():
-    """Read user_error_tracking.md and summarize weak grammar areas."""
-    if not os.path.exists(TRACKING_FILE):
-        return None
 
-    try:
-        with open(TRACKING_FILE, "r", encoding="utf-8") as f:
-            content = f.read()
-    except Exception:
-        return None
-
-    if not content.strip():
-        return None
-
-    categories = {}
-    for line in content.split("\n"):
-        if line.startswith("- **Error category:**"):
-            cat = line.replace("- **Error category:**", "").strip()
-            categories[cat] = categories.get(cat, 0) + 1
-
-    if not categories:
-        return None
-
-    sorted_cats = sorted(categories.items(), key=lambda x: x[1], reverse=True)
-    summary = "The candidate has historically struggled with these grammar areas (most frequent errors first):\n"
-    for cat, count in sorted_cats:
-        summary += f"- {cat}: {count} error(s)\n"
-
-    return summary
-
-
-def generate_exam(num_questions: int) -> dict:
+def generate_exam(num_questions: int, model_config: ModelConfig = None) -> dict:
     """
     Generate an SLE Written Expression exam with the given number of questions.
 
     Args:
         num_questions: Total number of individual questions (5-40)
+        model_config: Optional ModelConfig; defaults to load_default_configs()["generate"]
 
     Returns:
         dict with keys: session_id, contexts, timestamp, num_questions
     """
-    if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "your_deepseek_key_here":
-        raise ValueError("DEEPSEEK_API_KEY not configured in .env")
+    cfg = model_config or load_default_configs()["generate"]
 
-    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    if not cfg.api_key or cfg.api_key == "your_deepseek_key_here":
+        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY (or GENERATE_API_KEY) in .env")
+
+    client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
 
     num_questions = max(5, min(40, num_questions))
-    num_fill_blank = round(num_questions * 0.75)
+    num_fill_blank = round(num_questions * 0.5)   # 50% fill-in-blank
     num_error_id = num_questions - num_fill_blank
-
-    weak_areas_section = ""
-    weak_areas = _read_weak_areas()
-    if weak_areas:
-        weak_areas_section = f"""
-ADAPTIVE FOCUS:
-{weak_areas}
-Please generate MORE questions targeting these weak areas while still covering a variety of grammar topics.
-"""
 
     user_prompt = f"""Generate a French SLE Written Expression exam with exactly {num_questions} total questions:
 - {num_fill_blank} fill_in_blank questions (spread across multiple contexts, 1-2 questions per context)
 - {num_error_id} error_identification questions (1 question per context)
 
-{weak_areas_section}
+GRAMMAR COVERAGE REQUIREMENTS:
+Cover a broad range of grammar topics across all questions. Do NOT repeat the same grammar_topic more than twice. Distribute questions across these topics, prioritizing those most frequently tested on the real PSC SLE Written Expression exam:
+1. agreement (subject-verb, noun-adjective gender/number)
+2. conjugation (verb tense, mood, person)
+3. preposition
+4. vocabulary (word choice, register)
+5. tense
+6. pronoun / relative_pronoun
+7. conjunction
+8. spelling
+9. syntax
+10. adverb
+11. passive_voice
+
+Assign a distinct grammar_topic to each question and ensure no topic appears more than twice across all questions.
 
 Here is an example of the exact JSON structure to follow:
 {FEW_SHOT_EXAMPLES}
@@ -261,7 +232,7 @@ IMPORTANT RULES:
 - Return ONLY the JSON object"""
 
     response = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
+        model=cfg.model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt}
@@ -374,7 +345,7 @@ def _validate_context(ctx_data: dict, ctx_id: int, ctx_type: str, num_q: int, st
     return None
 
 
-def regenerate_context(context_to_replace: dict, existing_contexts: list, start_question_id: int, flagged_issues: list = None) -> dict:
+def regenerate_context(context_to_replace: dict, existing_contexts: list, start_question_id: int, flagged_issues: list = None, model_config: ModelConfig = None) -> dict:
     """
     Regenerate a single context that failed quality review.
 
@@ -383,6 +354,7 @@ def regenerate_context(context_to_replace: dict, existing_contexts: list, start_
         existing_contexts: All current contexts (for topic deduplication)
         start_question_id: The question_id to start numbering from
         flagged_issues: List of dicts with question_id, issue, category for each flagged problem
+        model_config: Optional ModelConfig; defaults to load_default_configs()["generate"]
 
     Returns:
         dict: A replacement context with corrected content
@@ -390,7 +362,10 @@ def regenerate_context(context_to_replace: dict, existing_contexts: list, start_
     Raises:
         ValueError: If the regenerated context fails structural validation
     """
-    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    cfg = model_config or load_default_configs()["generate"]
+    if not cfg.api_key or cfg.api_key == "your_deepseek_key_here":
+        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY (or GENERATE_API_KEY) in .env")
+    client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
 
     ctx_type = context_to_replace["type"]
     num_q = len(context_to_replace.get("questions", []))
@@ -472,7 +447,7 @@ Return a JSON object with this structure:
 Return ONLY the JSON object."""
 
     response = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
+        model=cfg.model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt}

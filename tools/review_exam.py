@@ -15,15 +15,11 @@ Also provides:
 
 import json
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
 from openai import OpenAI
-from dotenv import load_dotenv
-
-load_dotenv()
-
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"
+from tools.model_config import ModelConfig, load_default_configs
 
 REVIEW_TEMPERATURE = 0.1
 REVIEW_MAX_TOKENS = 4000
@@ -32,12 +28,12 @@ SYSTEM_TRACKING_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 
 
 # ── Shared API call ──────────────────────────────────────────────────────────
 
-def _call_review_api(system_prompt: str, user_prompt: str) -> dict:
+def _call_review_api(system_prompt: str, user_prompt: str, model_config: ModelConfig) -> dict:
     """Make a review API call with low temperature for strict, consistent judgments."""
-    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    client = OpenAI(api_key=model_config.api_key, base_url=model_config.base_url)
 
     response = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
+        model=model_config.model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -49,6 +45,22 @@ def _call_review_api(system_prompt: str, user_prompt: str) -> dict:
 
     raw = response.choices[0].message.content.strip()
     return json.loads(raw)
+
+
+# ── Severity enforcement ─────────────────────────────────────────────────────
+
+# Categories that can never be "critical" — cap them at "warning" regardless
+# of what the AI returns, as a safety net against prompt drift.
+EXAM_WARNING_ONLY_CATEGORIES = {"weak_distractor", "topic_mismatch"}
+FEEDBACK_WARNING_ONLY_CATEGORIES = {"misleading_explanation"}
+
+
+def _enforce_severity_rules(flagged_list: list, warning_only_categories: set) -> list:
+    """Downgrade any flags whose category should never be critical."""
+    for f in flagged_list:
+        if f.get("category") in warning_only_categories:
+            f["severity"] = "warning"
+    return flagged_list
 
 
 # ── Deterministic checks ─────────────────────────────────────────────────────
@@ -134,31 +146,33 @@ def log_system_errors(session_id: str, review_type: str, review_result: dict):
 
 EXAM_REVIEW_SYSTEM = """You are a senior French language quality assurance specialist and native French speaker reviewing AI-generated exam questions for the Canadian Public Service Commission's SLE Written Expression test.
 
-Your role is ADVERSARIAL: you must try to find problems. You are not the author of these questions — you are the reviewer who catches mistakes before students see them.
+Your role is to catch genuine errors that would make a question unsolvable or the answer key provably wrong. Be conservative: only flag issues that clearly break the question. When in doubt, do not flag as critical — use "warning" or skip.
 
 For each question, check ALL of the following:
 
 FILL-IN-THE-BLANK questions:
-1. PASSAGE GRAMMAR: Is the passage itself (excluding the blanks) grammatically perfect French? Flag any errors.
-2. CORRECT ANSWER VERIFICATION: Insert the marked "correct" answer into the blank. Read the full sentence. Is it genuinely the ONLY correct choice? Is the grammar, preposition, conjugation, and agreement perfect?
-3. DISTRACTOR ELIMINATION: Insert EACH distractor into the blank. Is it definitively wrong? Could a proficient French speaker argue it is also acceptable? If a distractor could work, flag it.
-4. DUPLICATE OPTIONS: Are any two options identical or nearly identical in text? Every option must be distinct.
-5. GRAMMAR TOPIC ACCURACY: Does the labeled grammar_topic actually match what the question tests?
+1. PASSAGE GRAMMAR: Is the passage itself (excluding the blanks) grammatically correct French? Flag errors only if they directly affect the blank or make the question unanswerable. Minor style issues are warnings only.
+2. CORRECT ANSWER VERIFICATION: Insert the marked "correct" answer into the blank. Is it grammatically correct and clearly the best choice? Flag as critical ONLY if the answer is objectively wrong (e.g. wrong agreement, wrong tense, ungrammatical).
+3. DISTRACTOR ELIMINATION: Insert EACH distractor into the blank. Flag as critical ONLY if a distractor is equally correct as the marked answer — i.e. a proficient native speaker would consider both equally valid. Do NOT flag if the marked answer is clearly best and the distractor is merely plausible. Plausible-but-wrong distractors are good exam design and should be flagged as "warning" (weak_distractor) at most.
+4. DUPLICATE OPTIONS: Are any two options identical or nearly identical in text? Flag as critical only if two options are effectively the same choice.
+5. GRAMMAR TOPIC ACCURACY: Does the labeled grammar_topic match what the question tests? Imprecise labels are warnings only.
 
 ERROR IDENTIFICATION questions:
-1. ERROR EXISTENCE: Is there actually a grammatical error in the segment marked as correct_answer? Identify the specific error.
-2. ERROR UNIQUENESS: Are the other bolded segments genuinely error-free? If another segment also has an error, flag it.
+1. ERROR EXISTENCE: Is there actually a grammatical error in the segment marked as correct_answer? Flag as critical if there is no real error.
+2. ERROR UNIQUENESS: Are the other bolded segments genuinely error-free? Flag as critical only if another segment also has a clear grammatical error.
 3. SEGMENT-PASSAGE MATCH: Do the bolded segments in the passage correspond to the option text?
 4. STRUCTURAL: Does question numbering in the passage match question_id?
 
 SEVERITY RULES:
-- "critical": The correct answer is wrong, multiple answers are correct, the passage has a grammar error that affects the question, an error_identification question has no real error in the "correct" segment, or two options have identical/duplicate text.
-- "warning": A distractor is slightly plausible but the correct answer is still clearly best, or the grammar topic label is imprecise.
+- "critical": The correct answer is objectively wrong, two options are equally correct (not just the distractor being plausible), the passage has a grammar error that directly makes the question unanswerable, an error_identification question has no real error in the "correct" segment, or two options have identical/duplicate text.
+- "warning": A distractor is plausible but the correct answer is clearly better, the grammar topic label is imprecise, or a passage has a minor stylistic issue that does not affect the question.
 
-Return ONLY a JSON object. Be STRICT. When in doubt, flag it."""
+IMPORTANT: The categories "weak_distractor" and "topic_mismatch" must ALWAYS be severity "warning", never "critical".
+
+Return ONLY a JSON object. Be conservative: only flag what is clearly broken."""
 
 
-def review_exam_quality(exam_data: dict) -> dict:
+def review_exam_quality(exam_data: dict, model_config: ModelConfig = None) -> dict:
     """
     Validate generated exam questions after generation.
 
@@ -174,15 +188,18 @@ def review_exam_quality(exam_data: dict) -> dict:
                 severity, issue, category
             summary: str
     """
+    cfg = model_config or load_default_configs()["review"]
+
     # Deterministic pre-checks
     duplicate_flags = _check_duplicate_options(exam_data)
 
     try:
         user_prompt = _build_exam_review_prompt(exam_data)
-        result = _call_review_api(EXAM_REVIEW_SYSTEM, user_prompt)
+        result = _call_review_api(EXAM_REVIEW_SYSTEM, user_prompt, cfg)
 
-        # Merge deterministic flags with API flags
+        # Merge deterministic flags with API flags, then enforce severity rules
         flagged = duplicate_flags + result.get("flagged_questions", [])
+        flagged = _enforce_severity_rules(flagged, EXAM_WARNING_ONLY_CATEGORIES)
         has_critical = any(f.get("severity") == "critical" for f in flagged)
 
         summary = result.get("summary", "Review complete.")
@@ -246,22 +263,24 @@ def _build_exam_review_prompt(exam_data: dict) -> str:
 
 FEEDBACK_REVIEW_SYSTEM = """You are a French grammar expert and educator reviewing AI-generated grammar explanations for incorrect exam answers on the Canadian PSC SLE Written Expression test.
 
-Your role is ADVERSARIAL: find inaccuracies before students learn from wrong information.
+Your role is to catch factually wrong grammar explanations that would teach students incorrect French. Be conservative: only flag explanations that contain a genuine factual error. Imprecise or incomplete explanations are acceptable — flag them as "warning" only if needed.
 
 For each explanation, verify:
-1. RULE ACCURACY: Is the cited grammar rule real and correctly stated? Would a reference grammar (Bescherelle, Grevisse) confirm it?
-2. REASONING CORRECTNESS: Does "why_incorrect" accurately explain why the student's answer is wrong? Does "why_correct" accurately explain the correct answer?
-3. CONSISTENCY: Does the explanation match the actual question content (passage, options, answers)?
-4. NO HALLUCINATION: Are there fabricated rules, exceptions, or examples that don't exist in standard French?
+1. RULE ACCURACY: Is the cited grammar rule real and correctly stated? Flag as critical only if the rule is factually wrong or directly contradicts standard French grammar (Bescherelle, Grevisse). Do not flag for imprecision or simplification.
+2. REASONING CORRECTNESS: Does "why_incorrect" explain why the student's answer is wrong? Does "why_correct" explain the correct answer? Flag as critical only if the reasoning is clearly backwards or contradicts the answer key.
+3. CONSISTENCY: Does the explanation match the actual question content (passage, options, answers)? Flag as critical only if there is a clear mismatch that would confuse the student.
+4. NO HALLUCINATION: Are there fabricated rules or exceptions that don't exist in standard French? Flag as critical only for clear hallucinations, not for uncommon but valid rules.
 
 SEVERITY RULES:
-- "critical": The grammar rule is wrong, the reasoning contradicts the actual correct answer, or the explanation would teach the student incorrect French.
-- "warning": The explanation is imprecise or could be clearer, but is not factually wrong.
+- "critical": The grammar rule is factually wrong, the reasoning directly contradicts the correct answer, or the explanation would actively teach the student incorrect French.
+- "warning": The explanation is imprecise, oversimplified, or could be clearer — but is not factually wrong.
 
-Return ONLY a JSON object. Be STRICT."""
+IMPORTANT: The category "misleading_explanation" must ALWAYS be severity "warning", never "critical". Reserve "critical" for "incorrect_rule", "wrong_reasoning", "hallucinated_rule", and "inconsistent_with_question" only when the error is clear and unambiguous.
+
+Return ONLY a JSON object. Be conservative: only flag what is clearly factually wrong."""
 
 
-def review_feedback_quality(evaluation_data: dict) -> dict:
+def review_feedback_quality(evaluation_data: dict, model_config: ModelConfig = None) -> dict:
     """
     Validate grammar explanations after evaluation.
 
@@ -274,14 +293,17 @@ def review_feedback_quality(evaluation_data: dict) -> dict:
             flagged_explanations: list of dicts with question_id, severity, issue, category
             summary: str
     """
+    cfg = model_config or load_default_configs()["review"]
+
     try:
         user_prompt = _build_feedback_review_prompt(evaluation_data)
         if not user_prompt:
             return {"passed": True, "flagged_explanations": [], "summary": "No explanations to review."}
 
-        result = _call_review_api(FEEDBACK_REVIEW_SYSTEM, user_prompt)
+        result = _call_review_api(FEEDBACK_REVIEW_SYSTEM, user_prompt, cfg)
 
         flagged = result.get("flagged_explanations", [])
+        flagged = _enforce_severity_rules(flagged, FEEDBACK_WARNING_ONLY_CATEGORIES)
         has_critical = any(f.get("severity") == "critical" for f in flagged)
 
         return {

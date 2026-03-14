@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(streamlit run:*)", "mcp__playwright__*"
+      "Bash(streamlit run:*)",
+      "mcp__playwright__*",
+      "Bash(find c:UserszhuolProjectfrench_sle_simulator -name test_*.py -o -name *_test.py)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(python -m pytest tests/test_model_config.py -v)",
+      "Bash(python -m pytest tests/test_generate_exam.py -v)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -c \"from tools.generate_exam import generate_exam, regenerate_context; print\\(''OK''\\)\")"
     ]
   }
 }

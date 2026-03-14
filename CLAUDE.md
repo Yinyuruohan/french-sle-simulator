@@ -4,13 +4,14 @@ You're working on the **French SLE Written Expression Simulator** — an AI-powe
 
 ## Project Overview
 
-This app generates realistic French SLE Written Expression exam questions via DeepSeek API, presents them through a Streamlit web UI, grades answers, provides grammar feedback, and tracks errors for adaptive learning.
+This app generates realistic French SLE Written Expression exam questions via a configurable AI API (default: DeepSeek), presents them through a Streamlit web UI, grades answers, provides grammar feedback, and tracks errors for review.
 
 **Key entry points:**
 - `streamlit run app.py` — launches the web UI
-- `tools/generate_exam.py` — generates exam questions (DeepSeek API)
-- `tools/evaluate_exam.py` — grades answers and generates feedback (DeepSeek API)
-- `tools/review_exam.py` — validates exam quality and feedback accuracy (DeepSeek API)
+- `tools/model_config.py` — `ModelConfig` dataclass + `load_default_configs()`; single source of truth for AI model settings
+- `tools/generate_exam.py` — generates exam questions (AI API)
+- `tools/evaluate_exam.py` — grades answers and generates feedback (AI API)
+- `tools/review_exam.py` — validates exam quality and feedback accuracy (AI API)
 - `workflows/sle_exam_simulator.md` — full SOP for the exam workflow
 
 ## The WAT Architecture
@@ -26,9 +27,13 @@ This app generates realistic French SLE Written Expression exam questions via De
 ```
 app.py                    # Streamlit web UI (4 stages: welcome → setup → exam → results)
 tools/
-  generate_exam.py        # DeepSeek API call to generate contexts→questions with A/B/C/D
+  model_config.py         # ModelConfig dataclass + load_default_configs(); per-tool AI model settings
+  generate_exam.py        # AI API call to generate contexts→questions with A/B/C/D
   evaluate_exam.py        # Grade answers, generate explanations, save feedback, track errors
-  review_exam.py          # Adversarial QA review of exam questions and feedback explanations
+  review_exam.py          # Conservative QA review of exam questions and feedback explanations
+tests/
+  test_model_config.py    # Unit tests for model_config.py (6 tests)
+  test_generate_exam.py   # ModelConfig wiring tests for generate_exam.py (3 tests)
 workflows/
   sle_exam_simulator.md   # Full SOP for the exam workflow
 contexts/
@@ -36,7 +41,7 @@ contexts/
 .tmp/                     # Disposable: generated exam + feedback markdown files
 user_error_tracking.md    # Persistent: cumulative error log across all sessions
 system_error_tracking.md  # Persistent: review-flagged issues across sessions (system QA log)
-.env                      # DEEPSEEK_API_KEY (never commit)
+.env                      # API keys (never commit); DEEPSEEK_API_KEY + optional per-tool overrides
 .env.template             # Template for .env
 requirements.txt          # python-dotenv, requests, openai, streamlit
 ```
@@ -48,7 +53,7 @@ Exams use a **contexts → questions** structure:
 - **Questions** numbered continuously across contexts: (1), (2), (3)...
 - **Choices** use A, B, C, D (each question has its own set)
 - Fill-in-blank contexts: 1–2 questions each
-- Error identification contexts: exactly 1 question, option D = "Aucun des choix offerts."
+- Error identification contexts: exactly 1 question; passage segments labeled **(A)**, **(B)**, **(C)**; options A/B/C contain segment text only; option D = "Aucun des choix offerts." (fixed, never shuffled)
 
 ## How to Operate
 
@@ -59,11 +64,10 @@ Exams use a **contexts → questions** structure:
 
 ## Key Technical Details
 
-- **AI Engine:** DeepSeek via `openai` Python SDK with `base_url="https://api.deepseek.com"`, model `deepseek-chat`
-- **Exam generation:** Single API call, JSON response format, temperature 0.7. Post-generation option shuffling randomizes A/B/C/D positions so the correct answer isn't predictable.
+- **AI Engine:** Any OpenAI-compatible endpoint via `openai` Python SDK. Default: DeepSeek (`base_url="https://api.deepseek.com"`, model `deepseek-chat`). Per-tool overrides via `GENERATE_*`, `EVALUATE_*`, `REVIEW_*` env vars or the in-app "AI model settings" expander. `tools/model_config.py` is the single source of truth.
+- **Exam generation:** Single API call, JSON response format, temperature 0.7. ~50% fill-in-blank, ~50% error identification. Prompt enforces broad grammar coverage: 11 real SLE topics, no topic repeated more than twice. Post-generation option shuffling randomizes A/B/C/D for fill-in-blank questions; error identification options are never shuffled (segment order must match passage labels).
 - **Evaluation:** Deterministic scoring + one API call for grammar explanations (temperature 0.3)
-- **Quality review:** Adversarial QA agent (`tools/review_exam.py`) validates exam questions and feedback explanations at temperature 0.1. Includes deterministic duplicate-option detection. Critical issues trigger targeted regeneration with structured error details and structural validation (max 1 retry per context/explanation). Feedback regeneration includes the rejected explanation and reviewer's specific feedback so the model corrects the exact issue. Failures are surfaced to the user, not silently swallowed. All flagged issues logged to `system_error_tracking.md`.
-- **Adaptive learning:** `generate_exam()` reads `user_error_tracking.md` to bias question generation toward weak grammar areas
+- **Quality review:** Conservative QA agent (`tools/review_exam.py`) validates exam questions and feedback explanations at temperature 0.1. Includes deterministic duplicate-option detection. `_enforce_severity_rules()` caps `weak_distractor`, `topic_mismatch`, and `misleading_explanation` flags at "warning" regardless of AI output. Critical issues trigger targeted regeneration (max 1 retry per context/explanation). Failures are surfaced to the user, not silently swallowed. All flagged issues logged to `system_error_tracking.md`.
 - **Output files:** Exam and feedback markdown saved to `.tmp/`; user errors appended to `user_error_tracking.md`; system QA issues appended to `system_error_tracking.md`
 
 ## Bottom Line

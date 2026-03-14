@@ -10,15 +10,11 @@ Works with the contexts→questions structure where each question uses A/B/C/D.
 
 import json
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
 from openai import OpenAI
-from dotenv import load_dotenv
-
-load_dotenv()
-
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"
+from tools.model_config import ModelConfig, load_default_configs
 
 TMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".tmp")
 TRACKING_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "user_error_tracking.md")
@@ -41,7 +37,7 @@ def _determine_level(score_pct: float) -> str:
         return "Below A / Sous le niveau A"
 
 
-def _generate_explanations(incorrect_items: list) -> dict:
+def _generate_explanations(incorrect_items: list, model_config: ModelConfig) -> dict:
     """
     Call DeepSeek API to generate structured grammar explanations.
 
@@ -51,7 +47,7 @@ def _generate_explanations(incorrect_items: list) -> dict:
     if not incorrect_items:
         return {}
 
-    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    client = OpenAI(api_key=model_config.api_key, base_url=model_config.base_url)
 
     is_regeneration = any("previous_explanation" in item for item in incorrect_items)
 
@@ -125,7 +121,7 @@ Return a JSON object mapping question IDs (as strings) to objects:
 Return ONLY the JSON object."""
 
     response = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
+        model=model_config.model,
         messages=[
             {"role": "system", "content": "You are a French grammar expert providing exam feedback. Return only valid JSON."},
             {"role": "user", "content": prompt}
@@ -186,7 +182,7 @@ def _append_to_tracking(session_id: str, incorrect_items: list, explanations: di
         f.write("\n".join(lines))
 
 
-def evaluate_exam(exam: dict, user_answers: dict) -> dict:
+def evaluate_exam(exam: dict, user_answers: dict, model_config: ModelConfig = None) -> dict:
     """
     Evaluate user answers against the exam answer key.
 
@@ -197,8 +193,9 @@ def evaluate_exam(exam: dict, user_answers: dict) -> dict:
     Returns:
         dict with: session_id, score, total, percentage, level, context_results
     """
-    if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "your_deepseek_key_here":
-        raise ValueError("DEEPSEEK_API_KEY not configured in .env")
+    cfg = model_config or load_default_configs()["evaluate"]
+    if not cfg.api_key or cfg.api_key == "your_deepseek_key_here":
+        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY (or EVALUATE_API_KEY) in .env")
 
     session_id = exam.get("session_id", f"exam_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
@@ -245,7 +242,7 @@ def evaluate_exam(exam: dict, user_answers: dict) -> dict:
         context_results.append(ctx_result)
 
     # Generate explanations for incorrect answers
-    explanations = _generate_explanations(incorrect_items)
+    explanations = _generate_explanations(incorrect_items, cfg)
 
     # Attach explanations to results
     for ctx_r in context_results:
@@ -353,7 +350,7 @@ def _save_feedback_markdown(evaluation: dict):
     return filepath
 
 
-def regenerate_explanations(incorrect_items: list) -> dict:
+def regenerate_explanations(incorrect_items: list, model_config: ModelConfig = None) -> dict:
     """
     Re-generate grammar explanations for specific incorrect items.
     Called by the feedback review loop when explanations are flagged as critical.
@@ -368,7 +365,10 @@ def regenerate_explanations(incorrect_items: list) -> dict:
     Returns:
         dict mapping question_id (int) -> explanation dict
     """
-    return _generate_explanations(incorrect_items)
+    cfg = model_config or load_default_configs()["evaluate"]
+    if not cfg.api_key or cfg.api_key == "your_deepseek_key_here":
+        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY (or EVALUATE_API_KEY) in .env")
+    return _generate_explanations(incorrect_items, cfg)
 
 
 def resave_feedback_markdown(evaluation: dict):
