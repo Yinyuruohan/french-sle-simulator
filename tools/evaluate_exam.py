@@ -366,6 +366,8 @@ def regenerate_explanations(incorrect_items: list, model_config: ModelConfig = N
         dict mapping question_id (int) -> explanation dict
     """
     cfg = model_config or load_default_configs()["evaluate"]
+    if not cfg.api_key or cfg.api_key == "your_deepseek_key_here":
+        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY (or EVALUATE_API_KEY) in .env")
     return _generate_explanations(incorrect_items, cfg)
 
 

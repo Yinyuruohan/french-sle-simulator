@@ -41,7 +41,7 @@ Then open the URL shown in the terminal (typically `http://localhost:8501`).
    - ~50% fill-in-the-blank, ~50% error identification
    - Canadian federal workplace scenarios
    - Grammar coverage requirements ensure broad distribution across real SLE topics (no topic repeated more than twice)
-   - Post-generation option shuffling (`_shuffle_options`) randomizes A/B/C/D positions so correct answers aren't predictably in one slot (error_identification option D "Aucun des choix offerts." stays fixed)
+   - Post-generation option shuffling (`_shuffle_options`) randomizes A/B/C/D positions for fill-in-blank questions so correct answers aren't predictably in one slot (error_identification questions are not shuffled — segment order must match passage labels)
    - Saves exam markdown to `.tmp/exam_YYYYMMDD_HHMMSS.md`
 4. **Exam quality review** — `review_exam_quality()` validates the generated exam:
    - Deterministic pre-check: flags any question with duplicate option text
@@ -84,7 +84,7 @@ The generation prompt includes:
 
 Temperature: 0.7 (balanced creativity for varied questions)
 
-Post-processing: `_shuffle_options()` randomizes the A/B/C/D positions for each question so the correct answer is uniformly distributed. For error_identification questions, option D ("Aucun des choix offerts.") stays fixed; only A/B/C are shuffled.
+Post-processing: `_shuffle_options()` randomizes the A/B/C/D positions for fill-in-blank questions so the correct answer is uniformly distributed. Error_identification questions are skipped entirely — their options must stay in the same order as the labeled passage segments (A), (B), (C), with D always being "Aucun des choix offerts."
 
 ## Evaluation Prompt Design
 

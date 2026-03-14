@@ -363,6 +363,8 @@ def regenerate_context(context_to_replace: dict, existing_contexts: list, start_
         ValueError: If the regenerated context fails structural validation
     """
     cfg = model_config or load_default_configs()["generate"]
+    if not cfg.api_key or cfg.api_key == "your_deepseek_key_here":
+        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY (or GENERATE_API_KEY) in .env")
     client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
 
     ctx_type = context_to_replace["type"]
