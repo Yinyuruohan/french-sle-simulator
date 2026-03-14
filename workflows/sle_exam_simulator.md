@@ -6,15 +6,16 @@ Generate realistic French SLE Written Expression practice exams, administer them
 
 ## Required Inputs
 
-- `DEEPSEEK_API_KEY` configured in `.env`
+- An API key for an OpenAI-compatible model endpoint, configured in `.env` (default: `DEEPSEEK_API_KEY`)
 - Number of questions (5–40, chosen by the user at runtime)
 
 ## Tools Used
 
 | Tool | Purpose |
 |---|---|
-| `tools/generate_exam.py` | Generates exam questions via DeepSeek API |
-| `tools/review_exam.py` | Validates exam quality and feedback accuracy via DeepSeek API |
+| `tools/model_config.py` | `ModelConfig` dataclass + `load_default_configs()` — single source of truth for AI model settings |
+| `tools/generate_exam.py` | Generates exam questions via AI API |
+| `tools/review_exam.py` | Validates exam quality and feedback accuracy via AI API |
 | `tools/evaluate_exam.py` | Grades answers, generates explanations, logs errors |
 
 ## How to Run
@@ -26,10 +27,16 @@ streamlit run app.py
 
 Then open the URL shown in the terminal (typically `http://localhost:8501`).
 
+**Model configuration** (`.env`):
+- `DEEPSEEK_API_KEY` — used by all three tools as the default key (with `base_url=https://api.deepseek.com`, model `deepseek-chat`)
+- Optional per-tool overrides: `GENERATE_API_KEY/BASE_URL/MODEL`, `EVALUATE_API_KEY/BASE_URL/MODEL`, `REVIEW_API_KEY/BASE_URL/MODEL`
+- Any OpenAI-compatible endpoint is supported (e.g. Gemini, OpenAI, local Ollama)
+- Per-session overrides are also available via the "AI model settings (optional)" expander on the setup screen
+
 ## Workflow Steps
 
 1. **Welcome screen** — User clicks "Start a writing exam"
-2. **Setup** — User selects number of questions (5–40)
+2. **Setup** — User selects number of questions (5–40); optionally expands "AI model settings" to override the model/endpoint/key for any tool independently
 3. **Generation** — `generate_exam()` calls DeepSeek to produce questions:
    - ~50% fill-in-the-blank, ~50% error identification
    - Canadian federal workplace scenarios
@@ -88,7 +95,7 @@ The evaluation prompt:
 
 ## Quality Review Prompt Design
 
-The review agent uses an **adversarial role framing** — the reviewer is a "QA specialist finding problems," not a test designer. This cognitive separation maximizes the chance of catching errors the generator introduced.
+The review agent uses a **conservative role framing** — the reviewer is a "careful QA specialist" that only flags issues it is confident about, not a test designer. This avoids false positives while still catching real errors.
 
 **Exam review checks:**
 1. Is the passage grammatically correct French?
