@@ -15,15 +15,11 @@ Also provides:
 
 import json
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
 from openai import OpenAI
-from dotenv import load_dotenv
-
-load_dotenv()
-
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"
+from tools.model_config import ModelConfig, load_default_configs
 
 REVIEW_TEMPERATURE = 0.1
 REVIEW_MAX_TOKENS = 4000
@@ -32,12 +28,12 @@ SYSTEM_TRACKING_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 
 
 # ── Shared API call ──────────────────────────────────────────────────────────
 
-def _call_review_api(system_prompt: str, user_prompt: str) -> dict:
+def _call_review_api(system_prompt: str, user_prompt: str, model_config: ModelConfig) -> dict:
     """Make a review API call with low temperature for strict, consistent judgments."""
-    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    client = OpenAI(api_key=model_config.api_key, base_url=model_config.base_url)
 
     response = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
+        model=model_config.model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -176,7 +172,7 @@ IMPORTANT: The categories "weak_distractor" and "topic_mismatch" must ALWAYS be 
 Return ONLY a JSON object. Be conservative: only flag what is clearly broken."""
 
 
-def review_exam_quality(exam_data: dict) -> dict:
+def review_exam_quality(exam_data: dict, model_config: ModelConfig = None) -> dict:
     """
     Validate generated exam questions after generation.
 
@@ -192,12 +188,14 @@ def review_exam_quality(exam_data: dict) -> dict:
                 severity, issue, category
             summary: str
     """
+    cfg = model_config or load_default_configs()["review"]
+
     # Deterministic pre-checks
     duplicate_flags = _check_duplicate_options(exam_data)
 
     try:
         user_prompt = _build_exam_review_prompt(exam_data)
-        result = _call_review_api(EXAM_REVIEW_SYSTEM, user_prompt)
+        result = _call_review_api(EXAM_REVIEW_SYSTEM, user_prompt, cfg)
 
         # Merge deterministic flags with API flags, then enforce severity rules
         flagged = duplicate_flags + result.get("flagged_questions", [])
@@ -282,7 +280,7 @@ IMPORTANT: The category "misleading_explanation" must ALWAYS be severity "warnin
 Return ONLY a JSON object. Be conservative: only flag what is clearly factually wrong."""
 
 
-def review_feedback_quality(evaluation_data: dict) -> dict:
+def review_feedback_quality(evaluation_data: dict, model_config: ModelConfig = None) -> dict:
     """
     Validate grammar explanations after evaluation.
 
@@ -295,12 +293,14 @@ def review_feedback_quality(evaluation_data: dict) -> dict:
             flagged_explanations: list of dicts with question_id, severity, issue, category
             summary: str
     """
+    cfg = model_config or load_default_configs()["review"]
+
     try:
         user_prompt = _build_feedback_review_prompt(evaluation_data)
         if not user_prompt:
             return {"passed": True, "flagged_explanations": [], "summary": "No explanations to review."}
 
-        result = _call_review_api(FEEDBACK_REVIEW_SYSTEM, user_prompt)
+        result = _call_review_api(FEEDBACK_REVIEW_SYSTEM, user_prompt, cfg)
 
         flagged = result.get("flagged_explanations", [])
         flagged = _enforce_severity_rules(flagged, FEEDBACK_WARNING_ONLY_CATEGORIES)
