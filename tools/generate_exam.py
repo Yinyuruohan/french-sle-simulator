@@ -12,15 +12,12 @@ Structure: contexts[] → questions[] (each question has its own A/B/C/D choices
 import json
 import os
 import random
+import sys
 from datetime import datetime
 from openai import OpenAI
-from dotenv import load_dotenv
 
-load_dotenv()
-
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.model_config import ModelConfig, load_default_configs
 
 TMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".tmp")
 
@@ -146,20 +143,23 @@ def _shuffle_options(exam_data: dict):
 
 
 
-def generate_exam(num_questions: int) -> dict:
+def generate_exam(num_questions: int, model_config: ModelConfig = None) -> dict:
     """
     Generate an SLE Written Expression exam with the given number of questions.
 
     Args:
         num_questions: Total number of individual questions (5-40)
+        model_config: Optional ModelConfig; defaults to load_default_configs()["generate"]
 
     Returns:
         dict with keys: session_id, contexts, timestamp, num_questions
     """
-    if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "your_deepseek_key_here":
-        raise ValueError("DEEPSEEK_API_KEY not configured in .env")
+    cfg = model_config or load_default_configs()["generate"]
 
-    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    if not cfg.api_key or cfg.api_key == "your_deepseek_key_here":
+        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY (or GENERATE_API_KEY) in .env")
+
+    client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
 
     num_questions = max(5, min(40, num_questions))
     num_fill_blank = round(num_questions * 0.5)   # 50% fill-in-blank
@@ -232,7 +232,7 @@ IMPORTANT RULES:
 - Return ONLY the JSON object"""
 
     response = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
+        model=cfg.model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt}
@@ -345,7 +345,7 @@ def _validate_context(ctx_data: dict, ctx_id: int, ctx_type: str, num_q: int, st
     return None
 
 
-def regenerate_context(context_to_replace: dict, existing_contexts: list, start_question_id: int, flagged_issues: list = None) -> dict:
+def regenerate_context(context_to_replace: dict, existing_contexts: list, start_question_id: int, flagged_issues: list = None, model_config: ModelConfig = None) -> dict:
     """
     Regenerate a single context that failed quality review.
 
@@ -354,6 +354,7 @@ def regenerate_context(context_to_replace: dict, existing_contexts: list, start_
         existing_contexts: All current contexts (for topic deduplication)
         start_question_id: The question_id to start numbering from
         flagged_issues: List of dicts with question_id, issue, category for each flagged problem
+        model_config: Optional ModelConfig; defaults to load_default_configs()["generate"]
 
     Returns:
         dict: A replacement context with corrected content
@@ -361,7 +362,8 @@ def regenerate_context(context_to_replace: dict, existing_contexts: list, start_
     Raises:
         ValueError: If the regenerated context fails structural validation
     """
-    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    cfg = model_config or load_default_configs()["generate"]
+    client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
 
     ctx_type = context_to_replace["type"]
     num_q = len(context_to_replace.get("questions", []))
@@ -443,7 +445,7 @@ Return a JSON object with this structure:
 Return ONLY the JSON object."""
 
     response = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
+        model=cfg.model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt}
