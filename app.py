@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from tools.generate_exam import generate_exam, regenerate_context, resave_exam_markdown
 from tools.evaluate_exam import evaluate_exam, regenerate_explanations, resave_feedback_markdown
 from tools.review_exam import review_exam_quality, review_feedback_quality, log_system_errors
+from tools.model_config import ModelConfig, load_default_configs
 
 st.set_page_config(
     page_title="SLE Written Expression Simulator",
@@ -32,6 +33,8 @@ if "exam_review" not in st.session_state:
     st.session_state.exam_review = None
 if "feedback_review" not in st.session_state:
     st.session_state.feedback_review = None
+if "model_configs" not in st.session_state:
+    st.session_state.model_configs = load_default_configs()
 
 
 def go_to(stage):
@@ -92,6 +95,26 @@ def render_setup():
 - ~{num_err} error identification questions / questions d'identification d'erreurs
 """)
 
+    with st.expander("AI model settings (optional)"):
+        for tool_key, label in [("generate", "Generation"), ("evaluate", "Evaluation"), ("review", "Review")]:
+            cfg = st.session_state.model_configs[tool_key]
+            st.markdown(f"**{label}**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                model = st.text_input("Model", value=cfg.model, key=f"{tool_key}_model")
+            with col2:
+                base_url = st.text_input("Base URL", value=cfg.base_url, key=f"{tool_key}_base_url")
+            with col3:
+                api_key = st.text_input("API Key", value="", placeholder="leave blank to use .env",
+                                        type="password", key=f"{tool_key}_api_key")
+            # Runs on every Streamlit rerun. The 'api_key or cfg.api_key' guard prevents
+            # a blank password field from overwriting a key already stored in session state.
+            st.session_state.model_configs[tool_key] = ModelConfig(
+                model=model,
+                base_url=base_url,
+                api_key=api_key or cfg.api_key,
+            )
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("← Back / Retour", use_container_width=True):
@@ -101,11 +124,11 @@ def render_setup():
         if st.button("Generate exam / Générer l'examen", type="primary", use_container_width=True):
             try:
                 with st.spinner("Generating your exam... / Génération de votre examen en cours..."):
-                    exam = generate_exam(num_questions)
+                    exam = generate_exam(num_questions, model_config=st.session_state.model_configs["generate"])
 
                 # ── Review Point 1: Exam quality ──
                 with st.spinner("Reviewing exam quality... / Vérification de la qualité..."):
-                    review = review_exam_quality(exam)
+                    review = review_exam_quality(exam, model_config=st.session_state.model_configs["review"])
 
                 if not review["passed"]:
                     # Collect critical issues grouped by context_id
@@ -125,7 +148,8 @@ def render_setup():
                                         start_qid = ctx["questions"][0]["question_id"]
 
                                         try:
-                                            new_ctx = regenerate_context(ctx, exam["contexts"], start_qid, issues)
+                                            new_ctx = regenerate_context(ctx, exam["contexts"], start_qid, issues,
+                                                                         model_config=st.session_state.model_configs["generate"])
                                             exam["contexts"][i] = new_ctx
                                         except Exception as regen_err:
                                             regen_failures.append(f"Context {ctx_id}: {regen_err}")
@@ -135,7 +159,7 @@ def render_setup():
                             resave_exam_markdown(exam)
 
                             # Re-review (but don't loop again)
-                            review = review_exam_quality(exam)
+                            review = review_exam_quality(exam, model_config=st.session_state.model_configs["review"])
 
                         if regen_failures:
                             st.warning(
@@ -226,7 +250,7 @@ def render_exam():
         st.session_state.user_answers = None
         try:
             with st.spinner("Evaluating your answers... / Évaluation de vos réponses en cours..."):
-                evaluation = evaluate_exam(exam, answers)
+                evaluation = evaluate_exam(exam, answers, model_config=st.session_state.model_configs["evaluate"])
 
             # ── Review Point 2: Feedback quality ──
             has_explanations = any(
@@ -238,7 +262,7 @@ def render_exam():
 
             if has_explanations:
                 with st.spinner("Verifying feedback quality... / Vérification des explications..."):
-                    feedback_review = review_feedback_quality(evaluation)
+                    feedback_review = review_feedback_quality(evaluation, model_config=st.session_state.model_configs["review"])
 
                 if not feedback_review["passed"]:
                     # Collect critical flagged question IDs
@@ -281,7 +305,7 @@ def render_exam():
 
                             if items_to_regen:
                                 try:
-                                    new_expls = regenerate_explanations(items_to_regen)
+                                    new_expls = regenerate_explanations(items_to_regen, model_config=st.session_state.model_configs["evaluate"])
 
                                     # Replace explanations in evaluation
                                     for ctx_r in evaluation["context_results"]:
@@ -293,7 +317,7 @@ def render_exam():
                                     resave_feedback_markdown(evaluation)
 
                                     # Re-review once (don't loop)
-                                    feedback_review = review_feedback_quality(evaluation)
+                                    feedback_review = review_feedback_quality(evaluation, model_config=st.session_state.model_configs["review"])
                                 except Exception as regen_err:
                                     regen_failures.append(str(regen_err))
 
