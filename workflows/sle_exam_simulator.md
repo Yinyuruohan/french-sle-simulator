@@ -57,7 +57,7 @@ Then open the URL shown in the terminal (typically `http://localhost:8501`).
 6. **Submission** — User submits answers
 7. **Evaluation** — `evaluate_exam()` processes answers:
    - Deterministic scoring against answer key
-   - DeepSeek API call for grammar explanations (wrong answers only)
+   - DeepSeek API call for grammar explanations (all questions: why_correct + grammar_rule)
    - Proportional level mapping: C (≥90%), B (≥70%), A (≥50%), Below A (<50%)
    - Saves feedback to `.tmp/feedback_YYYYMMDD_HHMMSS.md`
    - Appends errors to `user_error_tracking.md`
@@ -90,7 +90,7 @@ Post-processing: `_shuffle_options()` randomizes the A/B/C/D positions for fill-
 
 The evaluation prompt:
 - Receives only incorrect questions with user's wrong answer and correct answer
-- Asks for structured response: why_incorrect, why_correct, grammar_rule
+- Asks for structured response: why_correct, grammar_rule (for all questions, not just incorrect ones)
 - Temperature: 0.3 (precise, consistent explanations)
 
 ## Quality Review Prompt Design

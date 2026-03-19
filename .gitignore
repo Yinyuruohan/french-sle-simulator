@@ -10,6 +10,9 @@ token.json
 # Superpowers internal docs (plans, specs)
 docs/superpowers/
 
+# contexts folder
+contexts/
+
 # User data
 user_error_tracking.md
 system_error_tracking.md

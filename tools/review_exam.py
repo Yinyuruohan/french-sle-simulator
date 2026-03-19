@@ -267,7 +267,7 @@ Your role is to catch factually wrong grammar explanations that would teach stud
 
 For each explanation, verify:
 1. RULE ACCURACY: Is the cited grammar rule real and correctly stated? Flag as critical only if the rule is factually wrong or directly contradicts standard French grammar (Bescherelle, Grevisse). Do not flag for imprecision or simplification.
-2. REASONING CORRECTNESS: Does "why_incorrect" explain why the student's answer is wrong? Does "why_correct" explain the correct answer? Flag as critical only if the reasoning is clearly backwards or contradicts the answer key.
+2. REASONING CORRECTNESS: Does "why_correct" accurately explain the correct answer? Flag as critical only if the reasoning is clearly backwards or contradicts the answer key.
 3. CONSISTENCY: Does the explanation match the actual question content (passage, options, answers)? Flag as critical only if there is a clear mismatch that would confuse the student.
 4. NO HALLUCINATION: Are there fabricated rules or exceptions that don't exist in standard French? Flag as critical only for clear hallucinations, not for uncommon but valid rules.
 
@@ -320,12 +320,12 @@ def review_feedback_quality(evaluation_data: dict, model_config: ModelConfig = N
 
 
 def _build_feedback_review_prompt(evaluation_data: dict) -> str:
-    """Serialize incorrect answers with explanations for the review prompt."""
+    """Serialize all questions with explanations for the review prompt."""
     items = []
 
     for ctx_r in evaluation_data.get("context_results", []):
         for q_r in ctx_r["question_results"]:
-            if q_r["is_correct"] or not q_r.get("explanation"):
+            if not q_r.get("explanation"):
                 continue
 
             expl = q_r["explanation"]
@@ -335,12 +335,10 @@ def _build_feedback_review_prompt(evaluation_data: dict) -> str:
             entry = f"""Question ({q_r['question_id']}) [grammar_topic: {q_r['grammar_topic']}]
 Passage: {ctx_r['passage']}
 Options: {opts_str}
-Candidate chose: {q_r['user_answer']}) {opts[q_r['user_answer']]}
 Correct answer: {q_r['correct_answer']}) {opts[q_r['correct_answer']]}"""
 
             if isinstance(expl, dict):
                 entry += f"""
-why_incorrect: {expl.get('why_incorrect', 'N/A')}
 why_correct: {expl.get('why_correct', 'N/A')}
 grammar_rule: {expl.get('grammar_rule', 'N/A')}"""
             else:
@@ -352,7 +350,7 @@ grammar_rule: {expl.get('grammar_rule', 'N/A')}"""
         return ""
 
     lines = [
-        "Review the following grammar explanations for incorrect exam answers.\n",
+        "Review the following grammar explanations for exam answers.\n",
         "\n---\n".join(items),
         "",
         """Return JSON:

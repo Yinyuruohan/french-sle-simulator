@@ -37,22 +37,22 @@ def _determine_level(score_pct: float) -> str:
         return "Below A / Sous le niveau A"
 
 
-def _generate_explanations(incorrect_items: list, model_config: ModelConfig) -> dict:
+def _generate_explanations(items: list, model_config: ModelConfig) -> dict:
     """
-    Call DeepSeek API to generate structured grammar explanations.
+    Call DeepSeek API to generate structured grammar explanations for all questions.
 
     Returns dict mapping question_id -> dict with keys:
-      why_incorrect, why_correct, grammar_rule
+      why_correct, grammar_rule
     """
-    if not incorrect_items:
+    if not items:
         return {}
 
     client = OpenAI(api_key=model_config.api_key, base_url=model_config.base_url)
 
-    is_regeneration = any("previous_explanation" in item for item in incorrect_items)
+    is_regeneration = any("previous_explanation" in item for item in items)
 
     questions_text = ""
-    for item in incorrect_items:
+    for item in items:
         q = item["question"]
         opts = q["options"]
         opts_str = " | ".join(f"{k}) {v}" for k, v in opts.items())
@@ -60,7 +60,6 @@ def _generate_explanations(incorrect_items: list, model_config: ModelConfig) -> 
 Question ({q['question_id']}) [{q['grammar_topic']}]:
 Context passage: {item['passage']}
 Options: {opts_str}
-Candidate chose: {item['user_answer']}) {opts[item['user_answer']]}
 Correct answer: {q['correct_answer']}) {opts[q['correct_answer']]}
 """
         # Include previous explanation and reviewer feedback when regenerating
@@ -70,7 +69,6 @@ Correct answer: {q['correct_answer']}) {opts[q['correct_answer']]}
             if isinstance(prev_expl, dict):
                 questions_text += f"""
 PREVIOUS EXPLANATION (REJECTED BY REVIEWER):
-  why_incorrect: {prev_expl.get('why_incorrect', 'N/A')}
   why_correct: {prev_expl.get('why_correct', 'N/A')}
   grammar_rule: {prev_expl.get('grammar_rule', 'N/A')}
 REVIEWER FEEDBACK [{flag.get('category', 'unknown')}]: {flag.get('issue', 'N/A')}
@@ -89,19 +87,17 @@ YOU MUST write a COMPLETELY DIFFERENT explanation that fixes the reviewer's conc
 
 The previous explanations were flagged by a quality reviewer. You MUST address the reviewer's specific feedback and produce accurate, corrected explanations.
 
-For each question below, provide a structured explanation with THREE separate parts:
-1. **why_incorrect**: Why the candidate's chosen answer is wrong (1-2 sentences)
-2. **why_correct**: Why the correct answer is right (1-2 sentences)
-3. **grammar_rule**: The specific French grammar rule with a brief example (1-2 sentences)
+For each question below, provide a structured explanation with TWO separate parts:
+1. **why_correct**: Why the correct answer is right (1-2 sentences)
+2. **grammar_rule**: The specific French grammar rule with a brief example (1-2 sentences)
 
 IMPORTANT: Read the reviewer feedback carefully. If the reviewer says the reasoning is wrong, write completely new reasoning. If the reviewer says the grammar rule is incorrect, cite the correct rule. Do NOT repeat the same mistakes."""
     else:
         intro = """You are a French grammar expert providing feedback on an SLE Written Expression exam.
 
-For each incorrect answer below, provide a structured explanation with THREE separate parts:
-1. **why_incorrect**: Why the candidate's chosen answer is wrong (1-2 sentences)
-2. **why_correct**: Why the correct answer is right (1-2 sentences)
-3. **grammar_rule**: The specific French grammar rule with a brief example (1-2 sentences)"""
+For each question below, provide a structured explanation with TWO separate parts:
+1. **why_correct**: Why the correct answer is right (1-2 sentences)
+2. **grammar_rule**: The specific French grammar rule with a brief example (1-2 sentences)"""
 
     prompt = f"""{intro}
 
@@ -112,7 +108,6 @@ Write in English with French examples where helpful. Be precise and educational.
 Return a JSON object mapping question IDs (as strings) to objects:
 {{
   "1": {{
-    "why_incorrect": "...",
     "why_correct": "...",
     "grammar_rule": "..."
   }}
@@ -163,7 +158,6 @@ def _append_to_tracking(session_id: str, incorrect_items: list, explanations: di
         lines.append(f"- **Correct answer:** {q['correct_answer']}) {opts[q['correct_answer']]}")
         lines.append(f"- **Error category:** {q['grammar_topic']}")
         if isinstance(expl, dict):
-            lines.append(f"- **Why incorrect:** {expl.get('why_incorrect', 'N/A')}")
             lines.append(f"- **Why correct:** {expl.get('why_correct', 'N/A')}")
             lines.append(f"- **Grammar rule:** {expl.get('grammar_rule', 'N/A')}")
         else:
@@ -201,6 +195,7 @@ def evaluate_exam(exam: dict, user_answers: dict, model_config: ModelConfig = No
 
     correct_count = 0
     total_count = 0
+    all_items = []
     incorrect_items = []
     context_results = []
 
@@ -232,6 +227,12 @@ def evaluate_exam(exam: dict, user_answers: dict, model_config: ModelConfig = No
             }
             ctx_result["question_results"].append(q_result)
 
+            all_items.append({
+                "question": q,
+                "passage": ctx["passage"],
+                "user_answer": user_ans,
+            })
+
             if not is_correct:
                 incorrect_items.append({
                     "question": q,
@@ -241,14 +242,13 @@ def evaluate_exam(exam: dict, user_answers: dict, model_config: ModelConfig = No
 
         context_results.append(ctx_result)
 
-    # Generate explanations for incorrect answers
-    explanations = _generate_explanations(incorrect_items, cfg)
+    # Generate explanations for all questions (why_correct + grammar_rule)
+    explanations = _generate_explanations(all_items, cfg)
 
-    # Attach explanations to results
+    # Attach explanations to all results
     for ctx_r in context_results:
         for q_r in ctx_r["question_results"]:
-            if not q_r["is_correct"]:
-                q_r["explanation"] = explanations.get(q_r["question_id"])
+            q_r["explanation"] = explanations.get(q_r["question_id"])
 
     percentage = (correct_count / total_count * 100) if total_count > 0 else 0
     level = _determine_level(percentage / 100)
@@ -328,12 +328,10 @@ def _save_feedback_markdown(evaluation: dict):
 
             lines.append("")
 
-            # Explanation for incorrect answers
+            # Explanation for all questions
             expl = q_r.get("explanation")
-            if expl and not q_r["is_correct"]:
+            if expl:
                 if isinstance(expl, dict):
-                    lines.append(f"**Why incorrect:** {expl.get('why_incorrect', 'N/A')}")
-                    lines.append("")
                     lines.append(f"**Why correct:** {expl.get('why_correct', 'N/A')}")
                     lines.append("")
                     lines.append(f"**Grammar rule:** {expl.get('grammar_rule', 'N/A')}")

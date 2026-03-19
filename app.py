@@ -257,7 +257,6 @@ def render_exam():
                 q_r.get("explanation")
                 for ctx_r in evaluation["context_results"]
                 for q_r in ctx_r["question_results"]
-                if not q_r["is_correct"]
             )
 
             if has_explanations:
@@ -427,12 +426,11 @@ def render_results():
                     else:
                         st.markdown(f"{letter}) {opt_text}")
 
-                # Show explanation for incorrect answers
+                # Show explanation for all questions
                 expl = q_r.get("explanation")
-                if expl and not is_correct:
+                if expl:
                     st.markdown("---")
                     if isinstance(expl, dict):
-                        st.markdown(f"**Why incorrect:** {expl.get('why_incorrect', 'N/A')}")
                         st.markdown(f"**Why correct:** {expl.get('why_correct', 'N/A')}")
                         st.markdown(f"**Grammar rule:** {expl.get('grammar_rule', 'N/A')}")
                     else:
