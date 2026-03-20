@@ -134,3 +134,76 @@ def get_bank_stats() -> dict:
             stats[status] = count
 
     return stats
+
+
+def upgrade_to_battle_tested(source_session: str, evaluation: dict):
+    """
+    Upgrade cached contexts from 'reviewed' to 'battle_tested' by attaching
+    explanations from the evaluation results.
+
+    Uses source_session to narrow scope to the current exam's contexts, then
+    matches individual contexts via bank_context_id (for cached exams) or
+    passage_hash (for fresh exams) from the evaluation dict.
+
+    Args:
+        source_session: The session_id that generated the contexts
+        evaluation: The evaluation dict from evaluate_exam()
+    """
+    # Build mappings: bank_context_id -> explanations, passage_hash -> explanations
+    expl_by_bank_id = {}
+    expl_by_hash = {}
+    for ctx_r in evaluation.get("context_results", []):
+        explanations = []
+        for q_r in ctx_r["question_results"]:
+            expl = q_r.get("explanation")
+            if expl and isinstance(expl, dict):
+                explanations.append({
+                    "why_correct": expl.get("why_correct", ""),
+                    "grammar_rule": expl.get("grammar_rule", ""),
+                })
+            else:
+                explanations.append(None)
+
+        bank_id = ctx_r.get("bank_context_id")
+        if bank_id:
+            expl_by_bank_id[bank_id] = explanations
+        # Use original_passage_hash if available (works for renumbered passages),
+        # otherwise fall back to current passage hash
+        orig_hash = ctx_r.get("original_passage_hash")
+        p_hash = orig_hash or _passage_hash(ctx_r["passage"])
+        expl_by_hash[p_hash] = explanations
+
+    conn = _get_conn()
+    try:
+        # Narrow scope to current session's reviewed contexts
+        rows = conn.execute(
+            "SELECT context_id, passage, questions_json, passage_hash FROM contexts WHERE source_session = ? AND status = 'reviewed'",
+            (source_session,),
+        ).fetchall()
+
+        for row in rows:
+            ctx_id, passage, questions_json_str, p_hash = row[0], row[1], row[2], row[3]
+
+            # Match by bank_context_id first, then fall back to passage_hash
+            expls = expl_by_bank_id.get(ctx_id) or expl_by_hash.get(p_hash)
+            if not expls:
+                continue
+
+            questions = json.loads(questions_json_str)
+
+            # Check all questions have explanations
+            if len(expls) != len(questions) or any(e is None for e in expls):
+                continue
+
+            # Attach explanations
+            for i, q in enumerate(questions):
+                q["explanation"] = expls[i]
+
+            conn.execute(
+                "UPDATE contexts SET status = 'battle_tested', questions_json = ? WHERE context_id = ?",
+                (json.dumps(questions, ensure_ascii=False), ctx_id),
+            )
+
+        conn.commit()
+    finally:
+        conn.close()

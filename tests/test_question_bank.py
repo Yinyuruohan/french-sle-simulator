@@ -103,3 +103,79 @@ def test_cache_contexts_stores_correct_status(db_path):
     stats = get_bank_stats()
     assert stats["reviewed"] == 1
     assert stats["battle_tested"] == 0
+
+
+# ── Task 3: upgrade_to_battle_tested ────────────────────────────────────────
+
+def test_upgrade_to_battle_tested(db_path):
+    """upgrade_to_battle_tested updates status and stores explanations."""
+    from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, get_bank_stats
+    init_db()
+    exam = _make_exam(1)  # 1 fill_in_blank context with 2 questions
+    cache_contexts(exam)
+
+    # Build evaluation data matching evaluate_exam() output
+    evaluation = {
+        "session_id": exam["session_id"],
+        "context_results": [
+            {
+                "context_id": 1,
+                "type": "fill_in_blank",
+                "passage": exam["contexts"][0]["passage"],
+                "question_results": [
+                    {
+                        "question_id": 1,
+                        "is_correct": False,
+                        "explanation": {"why_correct": "Reason 1", "grammar_rule": "Rule 1"},
+                    },
+                    {
+                        "question_id": 2,
+                        "is_correct": True,
+                        "explanation": {"why_correct": "Reason 2", "grammar_rule": "Rule 2"},
+                    },
+                ],
+            }
+        ],
+    }
+
+    upgrade_to_battle_tested(exam["session_id"], evaluation)
+    stats = get_bank_stats()
+    assert stats["battle_tested"] == 1
+    assert stats["reviewed"] == 0
+
+
+def test_upgrade_skips_when_explanations_missing(db_path):
+    """Contexts stay 'reviewed' if not all questions have explanations."""
+    from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, get_bank_stats
+    init_db()
+    exam = _make_exam(1)
+    cache_contexts(exam)
+
+    # Evaluation with one explanation missing (None)
+    evaluation = {
+        "session_id": exam["session_id"],
+        "context_results": [
+            {
+                "context_id": 1,
+                "type": "fill_in_blank",
+                "passage": exam["contexts"][0]["passage"],
+                "question_results": [
+                    {
+                        "question_id": 1,
+                        "is_correct": True,
+                        "explanation": {"why_correct": "R1", "grammar_rule": "G1"},
+                    },
+                    {
+                        "question_id": 2,
+                        "is_correct": True,
+                        "explanation": None,  # missing
+                    },
+                ],
+            }
+        ],
+    }
+
+    upgrade_to_battle_tested(exam["session_id"], evaluation)
+    stats = get_bank_stats()
+    assert stats["reviewed"] == 1
+    assert stats["battle_tested"] == 0
