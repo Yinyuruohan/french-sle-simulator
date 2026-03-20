@@ -207,3 +207,213 @@ def upgrade_to_battle_tested(source_session: str, evaluation: dict):
         conn.commit()
     finally:
         conn.close()
+
+
+def assemble_exam_from_cache(num_questions: int) -> dict:
+    """
+    Assemble an exam from cached contexts with even grammar topic distribution
+    and ~50/50 type mix.
+
+    Args:
+        num_questions: Target number of questions (best-fit: exact, then -1, then +1)
+
+    Returns:
+        dict with keys:
+            available_questions: int — total questions in the bank
+            exam: dict | None — full exam dict with "source": "cache", or None
+    """
+    conn = _get_conn()
+    try:
+        # Get total available
+        total_row = conn.execute("SELECT COALESCE(SUM(num_questions), 0) FROM contexts").fetchone()
+        available = total_row[0]
+
+        # Calculate type mix targets
+        num_fill = round(num_questions * 0.5)
+        num_err = num_questions - num_fill
+
+        # Check per-type availability
+        fill_avail = conn.execute(
+            "SELECT COALESCE(SUM(num_questions), 0) FROM contexts WHERE type = 'fill_in_blank'"
+        ).fetchone()[0]
+        err_avail = conn.execute(
+            "SELECT COALESCE(SUM(num_questions), 0) FROM contexts WHERE type = 'error_identification'"
+        ).fetchone()[0]
+
+        # Adjust targets if one type is short — shift quota to the other type
+        if fill_avail < num_fill:
+            num_fill = fill_avail
+            num_err = min(num_questions - num_fill, err_avail)
+        elif err_avail < num_err:
+            num_err = err_avail
+            num_fill = min(num_questions - num_err, fill_avail)
+
+        if num_fill + num_err == 0:
+            return {"available_questions": available, "exam": None}
+
+        # Fetch all contexts grouped by type, weighted random (least-served first)
+        fill_rows = conn.execute(
+            "SELECT context_id, type, passage, questions_json, num_questions, grammar_topics "
+            "FROM contexts WHERE type = 'fill_in_blank' ORDER BY times_served ASC, RANDOM()"
+        ).fetchall()
+        err_rows = conn.execute(
+            "SELECT context_id, type, passage, questions_json, num_questions, grammar_topics "
+            "FROM contexts WHERE type = 'error_identification' ORDER BY times_served ASC, RANDOM()"
+        ).fetchall()
+
+        # Select contexts with even topic distribution
+        selected = []
+        selected += _select_contexts_evenly(fill_rows, num_fill)
+        selected += _select_contexts_evenly(err_rows, num_err)
+
+        if not selected:
+            return {"available_questions": available, "exam": None}
+
+        # Update times_served
+        for row in selected:
+            conn.execute(
+                "UPDATE contexts SET times_served = times_served + 1 WHERE context_id = ?",
+                (row[0],),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Build exam dict
+    exam = _build_exam_from_rows(selected)
+    return {"available_questions": available, "exam": exam}
+
+
+def _select_contexts_evenly(rows: list, target_questions: int) -> list:
+    """
+    Select contexts from rows aiming for even grammar topic distribution.
+    Uses best-fit strategy: (1) try exact match, (2) try target-1, (3) allow target+1.
+    Never exceeds target by more than 1.
+
+    Each row is: (context_id, type, passage, questions_json, num_questions, grammar_topics)
+    """
+    if not rows or target_questions <= 0:
+        return []
+
+    # Parse each row's topics for selection logic
+    parsed = []
+    for row in rows:
+        topics = row[5].split(",")
+        num_q = row[4]
+        parsed.append((row, topics, num_q))
+
+    def _greedy_select(parsed_rows, max_questions):
+        """Greedy selection: pick contexts whose topics are least represented, up to max_questions."""
+        topic_counts = {}
+        selected = []
+        total_q = 0
+        remaining = list(parsed_rows)
+
+        while remaining and total_q < max_questions:
+            best = None
+            best_score = float("inf")
+
+            for item in remaining:
+                row, topics, num_q = item
+                if total_q + num_q > max_questions:
+                    continue
+                score = sum(topic_counts.get(t, 0) for t in topics)
+                if score < best_score:
+                    best_score = score
+                    best = item
+
+            if best is None:
+                break
+
+            row, topics, num_q = best
+            selected.append(row)
+            total_q += num_q
+            for t in topics:
+                topic_counts[t] = topic_counts.get(t, 0) + 1
+            remaining.remove(best)
+
+        return selected, total_q
+
+    # Best-fit strategy: try exact, then target-1, then target+1
+    for limit in [target_questions, target_questions - 1, target_questions + 1]:
+        if limit <= 0:
+            continue
+        selected, total_q = _greedy_select(parsed, limit)
+        if total_q == limit:
+            return selected
+
+    # If none hit exactly, return the best attempt (exact target or under)
+    selected, _ = _greedy_select(parsed, target_questions)
+    return selected
+
+
+def _build_exam_from_rows(rows: list) -> dict:
+    """
+    Build a valid exam dict from selected database rows.
+    Renumbers context_ids, question_ids, and passage blank markers.
+    Stores original_passage_hash as fallback for post-exam matching.
+
+    Each row is: (context_id, type, passage, questions_json, num_questions, grammar_topics)
+    """
+    contexts = []
+    question_id = 1
+    blank_pattern = re.compile(r"\((\d+)\)\s*_+")
+
+    for ctx_idx, row in enumerate(rows, start=1):
+        db_ctx_id, ctx_type, passage, questions_json_str, num_q, topics = row
+        questions = json.loads(questions_json_str)
+
+        # Store original passage hash before any renumbering (fallback for post-exam matching)
+        orig_p_hash = _passage_hash(passage)
+
+        # Build question_id mapping for passage renumbering
+        new_questions = []
+        old_to_new = {}
+
+        for i, q in enumerate(questions):
+            new_qid = question_id + i
+            old_to_new[i] = new_qid
+            new_questions.append({
+                "question_id": new_qid,
+                "options": q["options"],
+                "correct_answer": q["correct_answer"],
+                "grammar_topic": q["grammar_topic"],
+                "explanation": q.get("explanation"),
+            })
+
+        # Renumber passage blank markers for fill_in_blank only
+        if ctx_type == "fill_in_blank":
+            blank_idx = [0]  # mutable counter for closure
+
+            def replace_blank(match, _new_questions=new_questions, _counter=blank_idx):
+                idx = _counter[0]
+                if idx < len(_new_questions):
+                    new_id = _new_questions[idx]["question_id"]
+                    _counter[0] += 1
+                    return f"({new_id}) _______________"
+                return match.group(0)
+
+            passage = blank_pattern.sub(replace_blank, passage)
+
+        contexts.append({
+            "context_id": ctx_idx,
+            "type": ctx_type,
+            "passage": passage,
+            "questions": new_questions,
+            "bank_context_id": db_ctx_id,
+            "original_passage_hash": orig_p_hash,
+        })
+
+        question_id += len(questions)
+
+    timestamp = datetime.now()
+    session_id = f"exam_{timestamp.strftime('%Y%m%d_%H%M%S')}"
+    total_q = sum(len(ctx["questions"]) for ctx in contexts)
+
+    return {
+        "session_id": session_id,
+        "timestamp": timestamp.isoformat(),
+        "num_questions": total_q,
+        "contexts": contexts,
+        "source": "cache",
+    }

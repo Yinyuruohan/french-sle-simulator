@@ -179,3 +179,155 @@ def test_upgrade_skips_when_explanations_missing(db_path):
     stats = get_bank_stats()
     assert stats["reviewed"] == 1
     assert stats["battle_tested"] == 0
+
+
+# ── Task 4: assemble_exam_from_cache ────────────────────────────────────────
+
+def _make_large_exam():
+    """Helper: build an exam with 10 questions across diverse topics and types."""
+    topics = ["agreement", "conjugation", "preposition", "vocabulary", "tense",
+              "pronoun", "conjunction", "spelling", "syntax", "adverb"]
+    contexts = []
+    qid = 1
+    for i in range(1, 9):  # 8 contexts
+        ctx_type = "fill_in_blank" if i <= 5 else "error_identification"
+        num_q = 2 if (ctx_type == "fill_in_blank" and i <= 2) else 1
+        questions = []
+        for _ in range(num_q):
+            questions.append({
+                "question_id": qid,
+                "options": {"A": f"a{qid}", "B": f"b{qid}", "C": f"c{qid}", "D": f"d{qid}"},
+                "correct_answer": "A",
+                "grammar_topic": topics[(qid - 1) % len(topics)],
+            })
+            qid += 1
+        passage = f"Unique passage {i} with ({questions[0]['question_id']}) _______________ blank."
+        contexts.append({
+            "context_id": i,
+            "type": ctx_type,
+            "passage": passage,
+            "questions": questions,
+        })
+    return {
+        "session_id": "exam_20260318_130000",
+        "timestamp": "2026-03-18T13:00:00",
+        "num_questions": qid - 1,
+        "contexts": contexts,
+    }
+
+
+def test_assemble_exam_returns_none_when_empty(db_path):
+    """assemble_exam_from_cache returns None exam when bank is empty."""
+    from tools.question_bank import init_db, assemble_exam_from_cache
+    init_db()
+    result = assemble_exam_from_cache(10)
+    assert result["exam"] is None
+    assert result["available_questions"] == 0
+
+
+def test_assemble_exam_returns_valid_exam(db_path):
+    """assemble_exam_from_cache returns a properly structured exam dict."""
+    from tools.question_bank import init_db, cache_contexts, assemble_exam_from_cache
+    init_db()
+    cache_contexts(_make_large_exam())
+    result = assemble_exam_from_cache(5)
+    exam = result["exam"]
+    assert exam is not None
+    assert exam["source"] == "cache"
+    assert "session_id" in exam
+    assert "contexts" in exam
+    # Question IDs must be continuous starting from 1
+    qids = [q["question_id"] for ctx in exam["contexts"] for q in ctx["questions"]]
+    assert qids == list(range(1, len(qids) + 1))
+    # Context IDs must be sequential starting from 1
+    cids = [ctx["context_id"] for ctx in exam["contexts"]]
+    assert cids == list(range(1, len(cids) + 1))
+    # Total questions should not exceed target by more than 1 (best-fit strategy)
+    assert len(qids) <= 6  # target 5 + 1 max overshoot
+
+
+def test_assemble_exam_best_fit_strategy(db_path):
+    """Assembled exam uses best-fit: exact, then target-1, then target+1 (never exceed by more than 1)."""
+    from tools.question_bank import init_db, cache_contexts, assemble_exam_from_cache
+    init_db()
+    cache_contexts(_make_large_exam())
+    for target in [5, 7, 10]:
+        result = assemble_exam_from_cache(target)
+        if result["exam"]:
+            total_q = sum(len(ctx["questions"]) for ctx in result["exam"]["contexts"])
+            assert total_q <= target + 1  # best-fit allows at most +1
+
+
+def test_assemble_exam_enforces_type_mix(db_path):
+    """Assembled exam has both fill-in-blank and error identification contexts."""
+    from tools.question_bank import init_db, cache_contexts, assemble_exam_from_cache
+    init_db()
+    cache_contexts(_make_large_exam())  # has both types
+    result = assemble_exam_from_cache(6)
+    exam = result["exam"]
+    assert exam is not None
+    types = [ctx["type"] for ctx in exam["contexts"]]
+    assert "fill_in_blank" in types
+    assert "error_identification" in types
+
+
+def test_assemble_exam_battle_tested_carries_explanations(db_path):
+    """Assembled exam from battle_tested contexts includes pre-baked explanations."""
+    from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, assemble_exam_from_cache
+    init_db()
+    exam = _make_large_exam()
+    cache_contexts(exam)
+
+    # Upgrade all contexts with explanations
+    evaluation = {"session_id": exam["session_id"], "context_results": []}
+    for ctx in exam["contexts"]:
+        ctx_r = {"context_id": ctx["context_id"], "type": ctx["type"], "passage": ctx["passage"], "question_results": []}
+        for q in ctx["questions"]:
+            ctx_r["question_results"].append({
+                "question_id": q["question_id"],
+                "is_correct": False,
+                "explanation": {"why_correct": "Reason", "grammar_rule": "Rule"},
+            })
+        evaluation["context_results"].append(ctx_r)
+    upgrade_to_battle_tested(exam["session_id"], evaluation)
+
+    result = assemble_exam_from_cache(5)
+    assert result["exam"] is not None
+    for ctx in result["exam"]["contexts"]:
+        for q in ctx["questions"]:
+            assert q["explanation"] is not None
+            assert q["explanation"]["why_correct"] == "Reason"
+
+
+def test_assemble_exam_renumbers_passage_blanks(db_path):
+    """Fill-in-blank passage blank markers are renumbered to match new question_ids."""
+    from tools.question_bank import init_db, cache_contexts, assemble_exam_from_cache
+    init_db()
+    # Create exam where context has question_id=5
+    exam = {
+        "session_id": "exam_renum_test",
+        "timestamp": "2026-03-18T14:00:00",
+        "num_questions": 1,
+        "contexts": [{
+            "context_id": 1,
+            "type": "fill_in_blank",
+            "passage": "Please fill (5) _______________ here.",
+            "questions": [{
+                "question_id": 5,
+                "options": {"A": "a", "B": "b", "C": "c", "D": "d"},
+                "correct_answer": "A",
+                "grammar_topic": "preposition",
+            }],
+        }],
+    }
+    cache_contexts(exam)
+    result = assemble_exam_from_cache(1)
+    assert result["exam"] is not None
+    # After assembly, question_id should be 1, and passage should say (1)
+    ctx = result["exam"]["contexts"][0]
+    assert "(1)" in ctx["passage"]
+    assert "(5)" not in ctx["passage"]
+    # bank_context_id (UUID) must be preserved for post-exam updates
+    assert ctx["bank_context_id"] is not None
+    # original_passage_hash must be stored as fallback for post-exam matching
+    assert ctx["original_passage_hash"] is not None
