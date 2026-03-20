@@ -35,3 +35,71 @@ def test_init_db_is_idempotent(db_path):
     from tools.question_bank import init_db
     init_db()
     init_db()  # should not raise
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _make_exam(num_contexts=2):
+    """Helper: build a minimal exam dict matching generate_exam() output."""
+    contexts = []
+    qid = 1
+    for i in range(1, num_contexts + 1):
+        ctx_type = "fill_in_blank" if i % 2 == 1 else "error_identification"
+        questions = []
+        num_q = 2 if ctx_type == "fill_in_blank" else 1
+        for _ in range(num_q):
+            questions.append({
+                "question_id": qid,
+                "options": {"A": "a", "B": "b", "C": "c", "D": "d"},
+                "correct_answer": "A",
+                "grammar_topic": "preposition" if qid % 2 == 0 else "agreement",
+            })
+            qid += 1
+        passage = f"Test passage ({i}) _______________ for context {i}."
+        contexts.append({
+            "context_id": i,
+            "type": ctx_type,
+            "passage": passage,
+            "questions": questions,
+        })
+    return {
+        "session_id": "exam_20260318_120000",
+        "timestamp": "2026-03-18T12:00:00",
+        "num_questions": qid - 1,
+        "contexts": contexts,
+    }
+
+
+# ── Task 2: cache_contexts and get_bank_stats ───────────────────────────────
+
+def test_cache_contexts_inserts_rows(db_path):
+    """cache_contexts inserts one row per context."""
+    from tools.question_bank import init_db, cache_contexts, get_bank_stats
+    init_db()
+    exam = _make_exam(2)
+    cache_contexts(exam)
+    stats = get_bank_stats()
+    assert stats["total_contexts"] == 2
+    assert stats["total_questions"] == 3  # 2 fill_in_blank + 1 error_id
+
+
+def test_cache_contexts_deduplicates_by_passage(db_path):
+    """Inserting the same exam twice does not create duplicate rows."""
+    from tools.question_bank import init_db, cache_contexts, get_bank_stats
+    init_db()
+    exam = _make_exam(2)
+    cache_contexts(exam)
+    cache_contexts(exam)  # same passages
+    stats = get_bank_stats()
+    assert stats["total_contexts"] == 2  # not 4
+
+
+def test_cache_contexts_stores_correct_status(db_path):
+    """Cached contexts default to 'reviewed' status."""
+    from tools.question_bank import init_db, cache_contexts, get_bank_stats
+    init_db()
+    exam = _make_exam(1)
+    cache_contexts(exam, status="reviewed")
+    stats = get_bank_stats()
+    assert stats["reviewed"] == 1
+    assert stats["battle_tested"] == 0
