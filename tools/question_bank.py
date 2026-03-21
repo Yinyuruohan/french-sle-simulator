@@ -417,3 +417,34 @@ def _build_exam_from_rows(rows: list) -> dict:
         "contexts": contexts,
         "source": "cache",
     }
+
+
+def prefill_bank(num_questions: int, model_configs: dict) -> dict:
+    """
+    Generate and review one exam, then cache the validated contexts.
+    Triggers 2-3 paid API calls (generation + review).
+
+    Args:
+        num_questions: Number of questions to generate
+        model_configs: Dict with 'generate' and 'review' keys mapping to ModelConfig
+
+    Returns:
+        dict with "success": bool and "message": str
+    """
+    from tools.generate_exam import generate_exam
+    from tools.review_exam import review_exam_quality
+
+    exam = generate_exam(num_questions, model_config=model_configs["generate"])
+    review = review_exam_quality(exam, model_config=model_configs["review"])
+
+    has_critical = any(
+        f.get("severity") == "critical"
+        for f in review.get("flagged_questions", [])
+    )
+
+    if has_critical:
+        return {"success": False, "message": "Generated exam had critical quality issues and was not cached. Try again."}
+
+    cache_contexts(exam, status="reviewed")
+    cached_q = sum(len(ctx.get("questions", [])) for ctx in exam.get("contexts", []))
+    return {"success": True, "message": f"Cached {cached_q} questions from {len(exam.get('contexts', []))} contexts."}

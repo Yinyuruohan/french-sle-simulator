@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import tempfile
+from unittest.mock import patch, MagicMock
 import pytest
 
 
@@ -331,3 +332,28 @@ def test_assemble_exam_renumbers_passage_blanks(db_path):
     assert ctx["bank_context_id"] is not None
     # original_passage_hash must be stored as fallback for post-exam matching
     assert ctx["original_passage_hash"] is not None
+
+
+# ── Task 5: prefill_bank ────────────────────────────────────────────────────
+
+def test_prefill_bank_generates_and_caches(db_path):
+    """prefill_bank calls generate_exam, review_exam_quality, and cache_contexts."""
+    from tools.question_bank import init_db, prefill_bank, get_bank_stats
+    from tools.model_config import ModelConfig
+    init_db()
+
+    exam = _make_exam(2)
+    review_result = {"passed": True, "flagged_questions": [], "summary": "OK"}
+    configs = {
+        "generate": ModelConfig(api_key="k", base_url="u", model="m"),
+        "review": ModelConfig(api_key="k", base_url="u", model="m"),
+    }
+
+    with patch("tools.generate_exam.generate_exam", return_value=exam) as mock_gen, \
+         patch("tools.review_exam.review_exam_quality", return_value=review_result) as mock_rev:
+        prefill_bank(10, configs)
+
+    mock_gen.assert_called_once_with(10, model_config=configs["generate"])
+    mock_rev.assert_called_once_with(exam, model_config=configs["review"])
+    stats = get_bank_stats()
+    assert stats["total_contexts"] == 2
