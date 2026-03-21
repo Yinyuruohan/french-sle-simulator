@@ -12,6 +12,7 @@ Structure: contexts[] → questions[] (each question has its own A/B/C/D choices
 import json
 import os
 import random
+import re
 import sys
 from datetime import datetime
 from openai import OpenAI
@@ -106,6 +107,17 @@ CRITICAL RULES:
 
 
 LETTERS = ["A", "B", "C", "D"]
+
+
+def _clean_json(raw: str) -> str:
+    """Strip markdown fences and trailing commas from AI-generated JSON."""
+    text = raw.strip()
+    # Remove ```json ... ``` or ``` ... ``` wrappers
+    text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+    text = re.sub(r"\n?```\s*$", "", text)
+    # Remove trailing commas before } or ]
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    return text
 
 
 def _shuffle_options(exam_data: dict):
@@ -231,19 +243,29 @@ IMPORTANT RULES:
 - Passages must be realistic Canadian federal workplace scenarios
 - Return ONLY the JSON object"""
 
-    response = client.chat.completions.create(
-        model=cfg.model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.7,
-        max_tokens=8000,
-        response_format={"type": "json_object"}
-    )
+    max_attempts = 2
+    for attempt in range(max_attempts):
+        response = client.chat.completions.create(
+            model=cfg.model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=12000,
+            response_format={"type": "json_object"}
+        )
 
-    raw_content = response.choices[0].message.content.strip()
-    exam_data = json.loads(raw_content)
+        finish_reason = response.choices[0].finish_reason
+        raw_content = response.choices[0].message.content.strip()
+
+        try:
+            exam_data = json.loads(_clean_json(raw_content))
+            break
+        except json.JSONDecodeError:
+            if attempt < max_attempts - 1 and finish_reason == "length":
+                continue  # Retry — response was truncated
+            raise
 
     # Randomize option positions so correct answer isn't always A
     _shuffle_options(exam_data)
@@ -458,7 +480,7 @@ Return ONLY the JSON object."""
     )
 
     raw = response.choices[0].message.content.strip()
-    ctx_data = json.loads(raw)
+    ctx_data = json.loads(_clean_json(raw))
 
     # Structural validation
     validation_error = _validate_context(ctx_data, ctx_id, type_label, num_q, start_question_id)

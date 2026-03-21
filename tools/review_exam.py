@@ -15,6 +15,7 @@ Also provides:
 
 import json
 import os
+import re
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
@@ -44,7 +45,11 @@ def _call_review_api(system_prompt: str, user_prompt: str, model_config: ModelCo
     )
 
     raw = response.choices[0].message.content.strip()
-    return json.loads(raw)
+    # Strip markdown fences and trailing commas from AI output
+    text = re.sub(r"^```(?:json)?\s*\n?", "", raw)
+    text = re.sub(r"\n?```\s*$", "", text)
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    return json.loads(text)
 
 
 # ── Severity enforcement ─────────────────────────────────────────────────────

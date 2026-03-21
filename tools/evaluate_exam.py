@@ -10,6 +10,7 @@ Works with the contexts→questions structure where each question uses A/B/C/D.
 
 import json
 import os
+import re
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
@@ -127,7 +128,11 @@ Return ONLY the JSON object."""
     )
 
     raw = response.choices[0].message.content.strip()
-    explanations_raw = json.loads(raw)
+    # Strip markdown fences and trailing commas from AI output
+    text = re.sub(r"^```(?:json)?\s*\n?", "", raw)
+    text = re.sub(r"\n?```\s*$", "", text)
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    explanations_raw = json.loads(text)
 
     return {int(k): v for k, v in explanations_raw.items()}
 
