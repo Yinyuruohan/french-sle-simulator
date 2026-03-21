@@ -16,6 +16,7 @@ from tools.generate_exam import generate_exam, regenerate_context, resave_exam_m
 from tools.evaluate_exam import evaluate_exam, regenerate_explanations, resave_feedback_markdown
 from tools.review_exam import review_exam_quality, review_feedback_quality, log_system_errors
 from tools.model_config import ModelConfig, load_default_configs
+from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, assemble_exam_from_cache, get_bank_stats, prefill_bank
 
 st.set_page_config(
     page_title="SLE Written Expression Simulator",
@@ -35,6 +36,8 @@ if "feedback_review" not in st.session_state:
     st.session_state.feedback_review = None
 if "model_configs" not in st.session_state:
     st.session_state.model_configs = load_default_configs()
+
+init_db()
 
 
 def go_to(stage):
@@ -94,6 +97,27 @@ def render_setup():
 - ~{num_fill} fill-in-the-blank questions / questions à compléter
 - ~{num_err} error identification questions / questions d'identification d'erreurs
 """)
+
+    # Question bank status
+    bank_stats = get_bank_stats()
+    st.markdown(f"**Question bank:** {bank_stats['total_questions']} questions available "
+                f"({bank_stats['battle_tested']} battle-tested, {bank_stats['reviewed']} reviewed)")
+
+    col_prefill1, col_prefill2 = st.columns([3, 1])
+    with col_prefill1:
+        st.caption("Pre-filling generates questions via API (2-3 paid calls)")
+    with col_prefill2:
+        if st.button("Pre-fill bank", use_container_width=True):
+            try:
+                with st.spinner("Generating and caching questions..."):
+                    result = prefill_bank(num_questions, st.session_state.model_configs)
+                if result["success"]:
+                    st.success(result["message"])
+                    st.rerun()
+                else:
+                    st.warning(result["message"])
+            except Exception as e:
+                st.error(f"Pre-fill failed: {e}")
 
     with st.expander("AI model settings (optional)"):
         for tool_key, label in [("generate", "Generation"), ("evaluate", "Evaluation"), ("review", "Review")]:
