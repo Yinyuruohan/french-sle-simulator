@@ -448,3 +448,47 @@ def prefill_bank(num_questions: int, model_configs: dict) -> dict:
     cache_contexts(exam, status="reviewed")
     cached_q = sum(len(ctx.get("questions", [])) for ctx in exam.get("contexts", []))
     return {"success": True, "message": f"Cached {cached_q} questions from {len(exam.get('contexts', []))} contexts."}
+
+
+def update_last_incorrect(evaluation: dict):
+    """
+    For each context in the evaluation, sets last_incorrect to 0 if all questions
+    were answered correctly, or 1 if any question was answered incorrectly.
+    Matches by bank_context_id (UUID) first, then original_passage_hash, then
+    passage_hash for fresh exams.
+
+    Args:
+        evaluation: The evaluation dict from evaluate_exam() or cached evaluation
+    """
+    conn = _get_conn()
+    try:
+        for ctx_r in evaluation.get("context_results", []):
+            has_incorrect = any(
+                not q_r.get("is_correct", True)
+                for q_r in ctx_r["question_results"]
+            )
+            flag = 1 if has_incorrect else 0
+
+            bank_id = ctx_r.get("bank_context_id")
+            orig_hash = ctx_r.get("original_passage_hash")
+            if bank_id:
+                conn.execute(
+                    "UPDATE contexts SET last_incorrect = ? WHERE context_id = ?",
+                    (flag, bank_id),
+                )
+            elif orig_hash:
+                # Cached exam with original_passage_hash fallback
+                conn.execute(
+                    "UPDATE contexts SET last_incorrect = ? WHERE passage_hash = ?",
+                    (flag, orig_hash),
+                )
+            else:
+                # Fresh exam — match by passage hash
+                p_hash = _passage_hash(ctx_r["passage"])
+                conn.execute(
+                    "UPDATE contexts SET last_incorrect = ? WHERE passage_hash = ?",
+                    (flag, p_hash),
+                )
+        conn.commit()
+    finally:
+        conn.close()

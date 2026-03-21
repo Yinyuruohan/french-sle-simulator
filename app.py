@@ -16,7 +16,7 @@ from tools.generate_exam import generate_exam, regenerate_context, resave_exam_m
 from tools.evaluate_exam import evaluate_exam, regenerate_explanations, resave_feedback_markdown
 from tools.review_exam import review_exam_quality, review_feedback_quality, log_system_errors
 from tools.model_config import ModelConfig, load_default_configs
-from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, assemble_exam_from_cache, get_bank_stats, prefill_bank
+from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, update_last_incorrect, assemble_exam_from_cache, get_bank_stats, prefill_bank
 
 st.set_page_config(
     page_title="SLE Written Expression Simulator",
@@ -42,6 +42,156 @@ init_db()
 
 def go_to(stage):
     st.session_state.stage = stage
+
+
+def _build_local_evaluation(exam, answers):
+    """Build evaluation dict with deterministic scoring — no API call."""
+    correct_count = 0
+    total_count = 0
+    context_results = []
+
+    for ctx in exam.get("contexts", []):
+        ctx_result = {
+            "context_id": ctx["context_id"],
+            "type": ctx["type"],
+            "passage": ctx["passage"],
+            "bank_context_id": ctx.get("bank_context_id"),
+            "original_passage_hash": ctx.get("original_passage_hash"),
+            "question_results": [],
+        }
+        for q in ctx.get("questions", []):
+            qid = q["question_id"]
+            user_ans = answers.get(qid, "")
+            is_correct = user_ans == q["correct_answer"]
+            total_count += 1
+            if is_correct:
+                correct_count += 1
+            ctx_result["question_results"].append({
+                "question_id": qid,
+                "grammar_topic": q["grammar_topic"],
+                "options": q["options"],
+                "user_answer": user_ans,
+                "correct_answer": q["correct_answer"],
+                "is_correct": is_correct,
+                "explanation": q.get("explanation"),
+            })
+        context_results.append(ctx_result)
+
+    percentage = (correct_count / total_count * 100) if total_count > 0 else 0
+    pct_frac = percentage / 100
+    if pct_frac >= 0.90:
+        level = "C"
+    elif pct_frac >= 0.70:
+        level = "B"
+    elif pct_frac >= 0.50:
+        level = "A"
+    else:
+        level = "Below A / Sous le niveau A"
+
+    return {
+        "session_id": exam["session_id"],
+        "score": correct_count,
+        "total": total_count,
+        "percentage": round(percentage, 1),
+        "level": level,
+        "context_results": context_results,
+    }
+
+
+def _review_feedback(exam, answers, evaluation):
+    """Run feedback quality review with optional regeneration. Returns (evaluation, feedback_review)."""
+    has_explanations = any(
+        q_r.get("explanation")
+        for ctx_r in evaluation["context_results"]
+        for q_r in ctx_r["question_results"]
+    )
+
+    feedback_review = None
+    if has_explanations:
+        with st.spinner("Verifying feedback quality... / Vérification des explications..."):
+            feedback_review = review_feedback_quality(evaluation, model_config=st.session_state.model_configs["review"])
+
+        if not feedback_review["passed"]:
+            # Collect critical flagged question IDs
+            critical_qids = set(
+                f["question_id"] for f in feedback_review.get("flagged_explanations", [])
+                if f.get("severity") == "critical"
+            )
+
+            if critical_qids:
+                flag_lookup = {}
+                for f in feedback_review.get("flagged_explanations", []):
+                    if f.get("severity") == "critical":
+                        flag_lookup[f["question_id"]] = f
+
+                regen_failures = []
+                with st.spinner("Regenerating flagged explanations... / Régénération des explications..."):
+                    items_to_regen = []
+                    for ctx in exam.get("contexts", []):
+                        for q in ctx.get("questions", []):
+                            if q["question_id"] in critical_qids:
+                                user_ans = answers.get(q["question_id"], "")
+                                if user_ans != q["correct_answer"]:
+                                    prev_expl = None
+                                    for ctx_r in evaluation["context_results"]:
+                                        for q_r in ctx_r["question_results"]:
+                                            if q_r["question_id"] == q["question_id"]:
+                                                prev_expl = q_r.get("explanation")
+                                                break
+
+                                    items_to_regen.append({
+                                        "question": q,
+                                        "passage": ctx["passage"],
+                                        "user_answer": user_ans,
+                                        "previous_explanation": prev_expl,
+                                        "flagged_issue": flag_lookup.get(q["question_id"]),
+                                    })
+
+                    if items_to_regen:
+                        try:
+                            new_expls = regenerate_explanations(items_to_regen, model_config=st.session_state.model_configs["evaluate"])
+
+                            for ctx_r in evaluation["context_results"]:
+                                for q_r in ctx_r["question_results"]:
+                                    if q_r["question_id"] in new_expls:
+                                        q_r["explanation"] = new_expls[q_r["question_id"]]
+
+                            resave_feedback_markdown(evaluation)
+                            feedback_review = review_feedback_quality(evaluation, model_config=st.session_state.model_configs["review"])
+                        except Exception as regen_err:
+                            regen_failures.append(str(regen_err))
+
+                if regen_failures:
+                    st.warning(
+                        "Some explanations could not be regenerated and may be inaccurate: "
+                        + "; ".join(regen_failures),
+                        icon="⚠️"
+                    )
+
+        if feedback_review.get("flagged_explanations"):
+            log_system_errors(exam["session_id"], "feedback_review", feedback_review)
+
+    return evaluation, feedback_review
+
+
+def _log_incorrect_to_tracking(exam, answers, evaluation):
+    """Log incorrect answers to user error tracking file."""
+    from tools.evaluate_exam import append_to_tracking
+    incorrect_items = []
+    for ctx in exam.get("contexts", []):
+        for q in ctx.get("questions", []):
+            user_ans = answers.get(q["question_id"], "")
+            if user_ans != q["correct_answer"]:
+                incorrect_items.append({
+                    "question": q,
+                    "passage": ctx["passage"],
+                    "user_answer": user_ans,
+                })
+    explanations = {}
+    for ctx_r in evaluation.get("context_results", []):
+        for q_r in ctx_r.get("question_results", []):
+            explanations[q_r["question_id"]] = q_r.get("explanation", {})
+    append_to_tracking(exam["session_id"], incorrect_items, explanations)
 
 
 # ── Welcome ──────────────────────────────────────────────────────────────────
@@ -315,98 +465,72 @@ def render_exam():
     if hasattr(st.session_state, "user_answers") and st.session_state.get("user_answers"):
         answers = st.session_state.user_answers
         st.session_state.user_answers = None
-        try:
-            with st.spinner("Evaluating your answers... / Évaluation de vos réponses en cours..."):
-                evaluation = evaluate_exam(exam, answers, model_config=st.session_state.model_configs["evaluate"])
 
-            # ── Review Point 2: Feedback quality ──
-            has_explanations = any(
-                q_r.get("explanation")
-                for ctx_r in evaluation["context_results"]
-                for q_r in ctx_r["question_results"]
-            )
+        is_cached = exam.get("source") == "cache"
+        has_all_explanations = is_cached and all(
+            q.get("explanation") is not None
+            for ctx in exam.get("contexts", [])
+            for q in ctx.get("questions", [])
+        )
 
-            if has_explanations:
-                with st.spinner("Verifying feedback quality... / Vérification des explications..."):
-                    feedback_review = review_feedback_quality(evaluation, model_config=st.session_state.model_configs["review"])
+        if is_cached and has_all_explanations:
+            # ── Path 1: Battle-tested cache — no API call needed ──
+            evaluation = _build_local_evaluation(exam, answers)
 
-                if not feedback_review["passed"]:
-                    # Collect critical flagged question IDs
-                    critical_qids = set(
-                        f["question_id"] for f in feedback_review.get("flagged_explanations", [])
-                        if f.get("severity") == "critical"
-                    )
+            _log_incorrect_to_tracking(exam, answers, evaluation)
+            update_last_incorrect(evaluation)
 
-                    if critical_qids:
-                        # Build a lookup: question_id -> flagged issue dict
-                        flag_lookup = {}
-                        for f in feedback_review.get("flagged_explanations", []):
-                            if f.get("severity") == "critical":
-                                flag_lookup[f["question_id"]] = f
-
-                        regen_failures = []
-                        with st.spinner("Regenerating flagged explanations... / Régénération des explications..."):
-                            # Build incorrect_items with previous explanation + reviewer feedback
-                            items_to_regen = []
-                            for ctx in exam.get("contexts", []):
-                                for q in ctx.get("questions", []):
-                                    if q["question_id"] in critical_qids:
-                                        user_ans = answers.get(q["question_id"], "")
-                                        if user_ans != q["correct_answer"]:
-                                            # Find the current (bad) explanation
-                                            prev_expl = None
-                                            for ctx_r in evaluation["context_results"]:
-                                                for q_r in ctx_r["question_results"]:
-                                                    if q_r["question_id"] == q["question_id"]:
-                                                        prev_expl = q_r.get("explanation")
-                                                        break
-
-                                            items_to_regen.append({
-                                                "question": q,
-                                                "passage": ctx["passage"],
-                                                "user_answer": user_ans,
-                                                "previous_explanation": prev_expl,
-                                                "flagged_issue": flag_lookup.get(q["question_id"]),
-                                            })
-
-                            if items_to_regen:
-                                try:
-                                    new_expls = regenerate_explanations(items_to_regen, model_config=st.session_state.model_configs["evaluate"])
-
-                                    # Replace explanations in evaluation
-                                    for ctx_r in evaluation["context_results"]:
-                                        for q_r in ctx_r["question_results"]:
-                                            if q_r["question_id"] in new_expls:
-                                                q_r["explanation"] = new_expls[q_r["question_id"]]
-
-                                    # Re-save feedback markdown
-                                    resave_feedback_markdown(evaluation)
-
-                                    # Re-review once (don't loop)
-                                    feedback_review = review_feedback_quality(evaluation, model_config=st.session_state.model_configs["review"])
-                                except Exception as regen_err:
-                                    regen_failures.append(str(regen_err))
-
-                        if regen_failures:
-                            st.warning(
-                                "Some explanations could not be regenerated and may be inaccurate: "
-                                + "; ".join(regen_failures),
-                                icon="⚠️"
-                            )
-
-                # Log any flagged issues to system error tracking
-                if feedback_review.get("flagged_explanations"):
-                    log_system_errors(exam["session_id"], "feedback_review", feedback_review)
-
-                st.session_state.feedback_review = feedback_review
-            else:
-                st.session_state.feedback_review = None
-
+            st.session_state.feedback_review = None
             st.session_state.evaluation = evaluation
             go_to("results")
             st.rerun()
-        except Exception as e:
-            st.error(f"Error evaluating exam: {e}")
+
+        elif is_cached and not has_all_explanations:
+            # ── Path 2: Reviewed cache — local scoring + API explanations only ──
+            try:
+                with st.spinner("Generating grammar explanations... / Génération des explications..."):
+                    evaluation = evaluate_exam(exam, answers, model_config=st.session_state.model_configs["evaluate"])
+
+                # Propagate bank_context_id and original_passage_hash into evaluation results
+                for ctx in exam.get("contexts", []):
+                    for ctx_r in evaluation.get("context_results", []):
+                        if ctx_r["context_id"] == ctx["context_id"]:
+                            ctx_r["bank_context_id"] = ctx.get("bank_context_id")
+                            ctx_r["original_passage_hash"] = ctx.get("original_passage_hash")
+
+                # ── Review Point 2: Feedback quality ──
+                evaluation, feedback_review = _review_feedback(exam, answers, evaluation)
+
+                # Upgrade to battle_tested now that we have explanations
+                upgrade_to_battle_tested(exam["session_id"], evaluation)
+                update_last_incorrect(evaluation)
+
+                st.session_state.feedback_review = feedback_review
+                st.session_state.evaluation = evaluation
+                go_to("results")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error evaluating exam: {e}")
+
+        else:
+            # ── Path 3: Fresh exam — existing evaluation pipeline ──
+            try:
+                with st.spinner("Evaluating your answers... / Évaluation de vos réponses en cours..."):
+                    evaluation = evaluate_exam(exam, answers, model_config=st.session_state.model_configs["evaluate"])
+
+                # ── Review Point 2: Feedback quality ──
+                evaluation, feedback_review = _review_feedback(exam, answers, evaluation)
+
+                # Post-evaluation triggers for fresh exams
+                upgrade_to_battle_tested(exam["session_id"], evaluation)
+                update_last_incorrect(evaluation)
+
+                st.session_state.feedback_review = feedback_review
+                st.session_state.evaluation = evaluation
+                go_to("results")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error evaluating exam: {e}")
 
 
 # ── Results ──────────────────────────────────────────────────────────────────

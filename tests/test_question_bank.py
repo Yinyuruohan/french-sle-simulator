@@ -357,3 +357,123 @@ def test_prefill_bank_generates_and_caches(db_path):
     mock_rev.assert_called_once_with(exam, model_config=configs["review"])
     stats = get_bank_stats()
     assert stats["total_contexts"] == 2
+
+
+# ── Task 9: update_last_incorrect ───────────────────────────────────────────
+
+def test_update_last_incorrect_by_bank_context_id(db_path):
+    """update_last_incorrect sets flag using bank_context_id for cached exams."""
+    from tools.question_bank import init_db, cache_contexts, update_last_incorrect
+    init_db()
+    exam = _make_exam(1)
+    cache_contexts(exam)
+
+    # Get the bank UUID assigned during caching
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    bank_id = conn.execute("SELECT context_id FROM contexts").fetchone()[0]
+    conn.close()
+
+    evaluation = {
+        "session_id": exam["session_id"],
+        "context_results": [
+            {
+                "context_id": 1,
+                "type": "fill_in_blank",
+                "passage": "renumbered passage that won't hash-match",
+                "bank_context_id": bank_id,
+                "question_results": [
+                    {"question_id": 1, "is_correct": False, "explanation": None},
+                    {"question_id": 2, "is_correct": True, "explanation": None},
+                ],
+            }
+        ],
+    }
+
+    update_last_incorrect(evaluation)
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT last_incorrect FROM contexts").fetchone()
+    conn.close()
+    assert row[0] == 1
+
+
+def test_update_last_incorrect_falls_back_to_hash(db_path):
+    """update_last_incorrect falls back to passage hash for fresh exams."""
+    from tools.question_bank import init_db, cache_contexts, update_last_incorrect
+    init_db()
+    exam = _make_exam(1)
+    cache_contexts(exam)
+
+    evaluation = {
+        "session_id": exam["session_id"],
+        "context_results": [
+            {
+                "context_id": 1,
+                "type": "fill_in_blank",
+                "passage": exam["contexts"][0]["passage"],
+                "question_results": [
+                    {"question_id": 1, "is_correct": False, "explanation": None},
+                    {"question_id": 2, "is_correct": True, "explanation": None},
+                ],
+            }
+        ],
+    }
+
+    update_last_incorrect(evaluation)
+
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT last_incorrect FROM contexts").fetchone()
+    conn.close()
+    assert row[0] == 1
+
+
+def test_update_last_incorrect_resets_from_one_to_zero(db_path):
+    """update_last_incorrect resets flag from 1 to 0 on a subsequent all-correct attempt."""
+    from tools.question_bank import init_db, cache_contexts, update_last_incorrect
+    init_db()
+    exam = _make_exam(1)
+    cache_contexts(exam)
+
+    import sqlite3
+
+    # First attempt: incorrect
+    evaluation_wrong = {
+        "session_id": exam["session_id"],
+        "context_results": [
+            {
+                "context_id": 1,
+                "type": "fill_in_blank",
+                "passage": exam["contexts"][0]["passage"],
+                "question_results": [
+                    {"question_id": 1, "is_correct": False, "explanation": None},
+                    {"question_id": 2, "is_correct": True, "explanation": None},
+                ],
+            }
+        ],
+    }
+    update_last_incorrect(evaluation_wrong)
+    conn = sqlite3.connect(db_path)
+    assert conn.execute("SELECT last_incorrect FROM contexts").fetchone()[0] == 1
+    conn.close()
+
+    # Second attempt: all correct
+    evaluation_right = {
+        "session_id": exam["session_id"],
+        "context_results": [
+            {
+                "context_id": 1,
+                "type": "fill_in_blank",
+                "passage": exam["contexts"][0]["passage"],
+                "question_results": [
+                    {"question_id": 1, "is_correct": True, "explanation": None},
+                    {"question_id": 2, "is_correct": True, "explanation": None},
+                ],
+            }
+        ],
+    }
+    update_last_incorrect(evaluation_right)
+    conn = sqlite3.connect(db_path)
+    assert conn.execute("SELECT last_incorrect FROM contexts").fetchone()[0] == 0
+    conn.close()

@@ -132,7 +132,7 @@ Return ONLY the JSON object."""
     return {int(k): v for k, v in explanations_raw.items()}
 
 
-def _append_to_tracking(session_id: str, incorrect_items: list, explanations: dict):
+def append_to_tracking(session_id: str, incorrect_items: list, explanations: dict):
     """Append incorrect answers to the persistent tracking file."""
     if not incorrect_items:
         return
@@ -263,7 +263,7 @@ def evaluate_exam(exam: dict, user_answers: dict, model_config: ModelConfig = No
     }
 
     _save_feedback_markdown(evaluation)
-    _append_to_tracking(session_id, incorrect_items, explanations)
+    append_to_tracking(session_id, incorrect_items, explanations)
 
     return evaluation
 
