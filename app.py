@@ -145,63 +145,106 @@ def render_setup():
             go_to("welcome")
             st.rerun()
     with col2:
-        if st.button("Generate exam / Générer l'examen", type="primary", use_container_width=True):
-            try:
-                with st.spinner("Generating your exam... / Génération de votre examen en cours..."):
-                    exam = generate_exam(num_questions, model_config=st.session_state.model_configs["generate"])
+        if st.button("Start exam / Commencer l'examen", type="primary", use_container_width=True):
+            # Try cache first
+            cache_result = assemble_exam_from_cache(num_questions)
 
-                # ── Review Point 1: Exam quality ──
-                with st.spinner("Reviewing exam quality... / Vérification de la qualité..."):
-                    review = review_exam_quality(exam, model_config=st.session_state.model_configs["review"])
-
-                if not review["passed"]:
-                    # Collect critical issues grouped by context_id
-                    critical_issues_by_ctx = {}
-                    for f in review.get("flagged_questions", []):
-                        if f.get("severity") == "critical":
-                            cid = f.get("context_id")
-                            if cid is not None:
-                                critical_issues_by_ctx.setdefault(cid, []).append(f)
-
-                    if critical_issues_by_ctx:
-                        regen_failures = []
-                        with st.spinner("Fixing flagged questions... / Correction des questions signalées..."):
-                            for ctx_id, issues in critical_issues_by_ctx.items():
-                                for i, ctx in enumerate(exam["contexts"]):
-                                    if ctx["context_id"] == ctx_id:
-                                        start_qid = ctx["questions"][0]["question_id"]
-
-                                        try:
-                                            new_ctx = regenerate_context(ctx, exam["contexts"], start_qid, issues,
-                                                                         model_config=st.session_state.model_configs["generate"])
-                                            exam["contexts"][i] = new_ctx
-                                        except Exception as regen_err:
-                                            regen_failures.append(f"Context {ctx_id}: {regen_err}")
-                                        break
-
-                            # Re-save exam markdown with corrected contexts
-                            resave_exam_markdown(exam)
-
-                            # Re-review (but don't loop again)
-                            review = review_exam_quality(exam, model_config=st.session_state.model_configs["review"])
-
-                        if regen_failures:
-                            st.warning(
-                                "Some questions could not be regenerated and may contain errors: "
-                                + "; ".join(regen_failures),
-                                icon="⚠️"
-                            )
-
-                # Log any flagged issues to system error tracking
-                if review.get("flagged_questions"):
-                    log_system_errors(exam["session_id"], "exam_review", review)
-
-                st.session_state.exam_review = review
-                st.session_state.exam = exam
+            if cache_result["exam"] is not None and cache_result["exam"]["num_questions"] >= num_questions:
+                # Full cache hit — serve instantly
+                st.session_state.exam = cache_result["exam"]
+                st.session_state.exam_review = {"passed": True, "flagged_questions": [], "summary": "Served from cache."}
                 go_to("exam")
                 st.rerun()
-            except Exception as e:
-                st.error(f"Error generating exam: {e}")
+            elif cache_result["exam"] is not None:
+                # Partial cache hit — assembler returned a shorter exam
+                st.session_state.cache_exam = cache_result["exam"]
+                st.session_state.requested_questions = num_questions
+            else:
+                # Empty cache — go straight to fresh generation
+                st.session_state.generate_fresh = True
+
+    # Choice dialog when cache returned a shorter exam
+    if st.session_state.get("cache_exam"):
+        cached_exam = st.session_state.cache_exam
+        avail = cached_exam["num_questions"]
+        requested = st.session_state.requested_questions
+        st.info(f"{avail} questions available in bank (you requested {requested}). Choose an option:", icon="📦")
+        col_cache, col_fresh = st.columns(2)
+        with col_cache:
+            if st.button(f"Take instant exam ({avail} questions)", use_container_width=True):
+                st.session_state.exam = cached_exam
+                st.session_state.cache_exam = None
+                st.session_state.exam_review = {"passed": True, "flagged_questions": [], "summary": "Served from cache."}
+                go_to("exam")
+                st.rerun()
+        with col_fresh:
+            if st.button(f"Generate fresh ({requested} questions)", use_container_width=True):
+                st.session_state.cache_exam = None
+                st.session_state.generate_fresh = True
+
+    # Fresh generation path (existing pipeline)
+    if st.session_state.get("generate_fresh"):
+        st.session_state.generate_fresh = None
+        requested = st.session_state.get("requested_questions", num_questions)
+        try:
+            with st.spinner("Generating your exam... / Génération de votre examen en cours..."):
+                exam = generate_exam(requested, model_config=st.session_state.model_configs["generate"])
+
+            # ── Review Point 1: Exam quality ──
+            with st.spinner("Reviewing exam quality... / Vérification de la qualité..."):
+                review = review_exam_quality(exam, model_config=st.session_state.model_configs["review"])
+
+            if not review["passed"]:
+                # Collect critical issues grouped by context_id
+                critical_issues_by_ctx = {}
+                for f in review.get("flagged_questions", []):
+                    if f.get("severity") == "critical":
+                        cid = f.get("context_id")
+                        if cid is not None:
+                            critical_issues_by_ctx.setdefault(cid, []).append(f)
+
+                if critical_issues_by_ctx:
+                    regen_failures = []
+                    with st.spinner("Fixing flagged questions... / Correction des questions signalées..."):
+                        for ctx_id, issues in critical_issues_by_ctx.items():
+                            for i, ctx in enumerate(exam["contexts"]):
+                                if ctx["context_id"] == ctx_id:
+                                    start_qid = ctx["questions"][0]["question_id"]
+
+                                    try:
+                                        new_ctx = regenerate_context(ctx, exam["contexts"], start_qid, issues,
+                                                                     model_config=st.session_state.model_configs["generate"])
+                                        exam["contexts"][i] = new_ctx
+                                    except Exception as regen_err:
+                                        regen_failures.append(f"Context {ctx_id}: {regen_err}")
+                                    break
+
+                        # Re-save exam markdown with corrected contexts
+                        resave_exam_markdown(exam)
+
+                        # Re-review (but don't loop again)
+                        review = review_exam_quality(exam, model_config=st.session_state.model_configs["review"])
+
+                    if regen_failures:
+                        st.warning(
+                            "Some questions could not be regenerated and may contain errors: "
+                            + "; ".join(regen_failures),
+                            icon="⚠️"
+                        )
+
+            # Log any flagged issues to system error tracking
+            if review.get("flagged_questions"):
+                log_system_errors(exam["session_id"], "exam_review", review)
+
+            # Cache validated contexts from fresh exam
+            cache_contexts(exam, status="reviewed")
+
+            st.session_state.exam_review = review
+            st.session_state.exam = exam
+            go_to("exam")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error generating exam: {e}")
 
 
 # ── Exam ─────────────────────────────────────────────────────────────────────
