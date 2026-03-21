@@ -17,6 +17,7 @@ Generate realistic French SLE Written Expression practice exams, administer them
 | `tools/generate_exam.py` | Generates exam questions via AI API |
 | `tools/review_exam.py` | Validates exam quality and feedback accuracy via AI API |
 | `tools/evaluate_exam.py` | Grades answers, generates explanations, logs errors |
+| `tools/question_bank.py` | Caches validated contexts in SQLite; assembles instant exams from cache |
 
 ## How to Run
 
@@ -36,14 +37,18 @@ Then open the URL shown in the terminal (typically `http://localhost:8501`).
 ## Workflow Steps
 
 1. **Welcome screen** — User clicks "Start a writing exam"
-2. **Setup** — User selects number of questions (5–40); optionally expands "AI model settings" to override the model/endpoint/key for any tool independently
-3. **Generation** — `generate_exam()` calls DeepSeek to produce questions:
+2. **Setup** — User selects number of questions (5–40); optionally expands "AI model settings" to override the model/endpoint/key for any tool independently. Displays question bank stats and a "Pre-fill bank" button.
+3. **Cache check** — `assemble_exam_from_cache()` checks the question bank:
+   - Sufficient cache → assembles exam instantly, skips generation and review
+   - Partial cache → user chooses: shorter instant exam or generate fresh
+   - Empty cache → proceeds to fresh generation
+4. **Generation** — `generate_exam()` calls DeepSeek to produce questions:
    - ~50% fill-in-the-blank, ~50% error identification
    - Canadian federal workplace scenarios
    - Grammar coverage requirements ensure broad distribution across real SLE topics (no topic repeated more than twice)
    - Post-generation option shuffling (`_shuffle_options`) randomizes A/B/C/D positions for fill-in-blank questions so correct answers aren't predictably in one slot (error_identification questions are not shuffled — segment order must match passage labels)
    - Saves exam markdown to `.tmp/exam_YYYYMMDD_HHMMSS.md`
-4. **Exam quality review** — `review_exam_quality()` validates the generated exam:
+5. **Exam quality review** — `review_exam_quality()` validates the generated exam:
    - Deterministic pre-check: flags any question with duplicate option text
    - API review: checks passage grammar, answer key correctness, distractor validity
    - If critical issues found: `regenerate_context()` replaces affected contexts (max 1 retry per context)
@@ -53,15 +58,18 @@ Then open the URL shown in the terminal (typically `http://localhost:8501`).
    - If warnings only: proceeds with flags stored in session state
    - All flagged issues (critical and warning) logged to `system_error_tracking.md`
    - Temperature: 0.1 (strict, consistent review)
-5. **Exam** — Questions displayed with radio buttons. Strict examiner tone. Warning banner shown if any questions were flagged.
-6. **Submission** — User submits answers
-7. **Evaluation** — `evaluate_exam()` processes answers:
+6. **Exam** — Questions displayed with radio buttons. Strict examiner tone. Warning banner shown if any questions were flagged.
+7. **Submission** — User submits answers
+8. **Evaluation** — Three paths depending on exam source:
    - Deterministic scoring against answer key
    - DeepSeek API call for grammar explanations (all questions: why_correct + grammar_rule)
    - Proportional level mapping: C (≥90%), B (≥70%), A (≥50%), Below A (<50%)
    - Saves feedback to `.tmp/feedback_YYYYMMDD_HHMMSS.md`
    - Appends errors to `user_error_tracking.md`
-8. **Feedback quality review** — `review_feedback_quality()` validates explanations:
+   - **Battle-tested cache:** Deterministic scoring + pre-baked explanations, no API call
+   - **Reviewed cache:** Deterministic scoring + API call for explanations only, then upgrade to battle_tested
+   - **Fresh exam:** Full `evaluate_exam()` pipeline, then cache contexts and upgrade
+9. **Feedback quality review** — `review_feedback_quality()` validates explanations:
    - Checks grammar rule accuracy, reasoning correctness
    - If critical issues found: `regenerate_explanations()` re-generates only flagged explanations (max 1 retry)
      - Regeneration receives the previous rejected explanation and the reviewer's specific feedback (category + issue description)
@@ -70,7 +78,7 @@ Then open the URL shown in the terminal (typically `http://localhost:8501`).
    - Re-saves corrected feedback markdown after regeneration
    - All flagged issues logged to `system_error_tracking.md`
    - Results page shows severity-appropriate warnings: critical flags show a prominent warning, warning flags show a caption note
-9. **Results** — Score, level, per-question breakdown with explanations
+10. **Results** — Score, level, per-question breakdown with explanations
 
 ## Exam Generation Prompt Design
 
@@ -143,6 +151,7 @@ These are simplified proportional thresholds scaled to the user's chosen number 
 | Feedback markdown | `.tmp/feedback_*.md` | Disposable |
 | User error tracking | `user_error_tracking.md` | Persistent (append-only, user mistakes) |
 | System error tracking | `system_error_tracking.md` | Persistent (append-only, review-flagged QA issues) |
+| Question bank | `question_bank.db` | Persistent (SQLite cache, can be deleted and rebuilt) |
 
 ## Known Limitations
 
@@ -154,7 +163,6 @@ These are simplified proportional thresholds scaled to the user's chosen number 
 ## Future Improvements
 
 - Add a countdown timer matching the official 45-minute window
-- Implement a question bank to cache high-quality generated questions
 - Add difficulty levels (A/B/C targeting)
 - Export results to PDF
 - Add a dashboard showing progress over time from the tracking file

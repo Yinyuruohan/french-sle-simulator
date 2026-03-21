@@ -12,6 +12,7 @@ This app generates realistic French SLE Written Expression exam questions via a 
 - `tools/generate_exam.py` — generates exam questions (AI API)
 - `tools/evaluate_exam.py` — grades answers and generates feedback (AI API)
 - `tools/review_exam.py` — validates exam quality and feedback accuracy (AI API)
+- `tools/question_bank.py` — SQLite question bank: cache validated contexts, assemble instant exams
 - `workflows/sle_exam_simulator.md` — full SOP for the exam workflow
 
 ## The WAT Architecture
@@ -31,9 +32,11 @@ tools/
   generate_exam.py        # AI API call to generate contexts→questions with A/B/C/D
   evaluate_exam.py        # Grade answers, generate explanations, save feedback, track errors
   review_exam.py          # Conservative QA review of exam questions and feedback explanations
+  question_bank.py        # SQLite question bank: cache, assemble, prefill
 tests/
   test_model_config.py    # Unit tests for model_config.py (6 tests)
   test_generate_exam.py   # ModelConfig wiring tests for generate_exam.py (3 tests)
+  test_question_bank.py   # Unit tests for question_bank.py (17 tests)
 workflows/
   sle_exam_simulator.md   # Full SOP for the exam workflow
 contexts/
@@ -41,6 +44,7 @@ contexts/
 .tmp/                     # Disposable: generated exam + feedback markdown files
 user_error_tracking.md    # Persistent: cumulative error log across all sessions
 system_error_tracking.md  # Persistent: review-flagged issues across sessions (system QA log)
+question_bank.db          # Persistent: SQLite question bank cache (gitignored, can be deleted and rebuilt)
 .env                      # API keys (never commit); DEEPSEEK_API_KEY + optional per-tool overrides
 .env.template             # Template for .env
 requirements.txt          # python-dotenv, requests, openai, streamlit
