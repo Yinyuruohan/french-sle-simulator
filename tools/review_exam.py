@@ -96,6 +96,56 @@ def _check_duplicate_options(exam_data: dict) -> list:
     return flagged
 
 
+def _check_structural_mismatch(exam_data: dict) -> list:
+    """
+    Deterministic check: verify passage structure matches question structure.
+    - Fill-in-blank: (N) ___ markers must match question_id values
+    - Error identification: (A), (B), (C) segment labels must match options A/B/C
+    """
+    flagged = []
+    blank_pattern = re.compile(r"\((\d+)\)\s*_+")
+    segment_pattern = re.compile(r"\(([A-C])\)")
+
+    for ctx in exam_data.get("contexts", []):
+        questions = ctx.get("questions", [])
+        if not questions:
+            continue
+
+        if ctx["type"] == "fill_in_blank":
+            passage_blanks = set(int(m) for m in blank_pattern.findall(ctx["passage"]))
+            question_ids = set(q["question_id"] for q in questions)
+            if passage_blanks != question_ids:
+                missing_blanks = question_ids - passage_blanks
+                extra_blanks = passage_blanks - question_ids
+                issue_parts = []
+                if missing_blanks:
+                    issue_parts.append(f"missing blanks for question_ids {missing_blanks}")
+                if extra_blanks:
+                    issue_parts.append(f"extra blanks {extra_blanks} with no matching questions")
+                flagged.append({
+                    "question_id": questions[0]["question_id"],
+                    "context_id": ctx["context_id"],
+                    "severity": "critical",
+                    "issue": f"Structural mismatch: {'; '.join(issue_parts)}",
+                    "category": "structural_mismatch",
+                })
+
+        elif ctx["type"] == "error_identification":
+            passage_segments = set(segment_pattern.findall(ctx["passage"]))
+            # Options A, B, C should correspond to passage segments; skip D
+            option_keys = set(k for k in questions[0].get("options", {}).keys() if k != "D")
+            if passage_segments != option_keys:
+                flagged.append({
+                    "question_id": questions[0]["question_id"],
+                    "context_id": ctx["context_id"],
+                    "severity": "critical",
+                    "issue": f"Structural mismatch: passage segments {passage_segments} don't match option keys {option_keys}",
+                    "category": "structural_mismatch",
+                })
+
+    return flagged
+
+
 # ── System error tracking ────────────────────────────────────────────────────
 
 def log_system_errors(session_id: str, review_type: str, review_result: dict):
