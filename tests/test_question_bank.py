@@ -436,6 +436,43 @@ def test_assemble_exam_renumbers_passage_blanks(db_path):
 
 # ── Task 5: prefill_bank ────────────────────────────────────────────────────
 
+def test_prefill_bank_caches_warned_contexts(db_path):
+    """prefill_bank caches contexts with warnings as 'warned' status."""
+    from tools.question_bank import init_db, prefill_bank, get_bank_stats
+    from tools.model_config import ModelConfig
+    init_db()
+
+    exam = _make_exam(2)
+    # Add explanations (as new generate_exam produces)
+    for ctx in exam["contexts"]:
+        for q in ctx["questions"]:
+            q["explanation"] = {"why_correct": "R", "grammar_rule": "G"}
+
+    # Review returns warnings for context_id=1
+    review_result = {
+        "passed": True,
+        "flagged_questions": [
+            {"question_id": 1, "context_id": 1, "severity": "warning",
+             "issue": "Weak distractor", "category": "weak_distractor"}
+        ],
+        "summary": "OK with warnings",
+    }
+    configs = {
+        "generate": ModelConfig(api_key="k", base_url="u", model="m"),
+        "review": ModelConfig(api_key="k", base_url="u", model="m"),
+    }
+
+    with patch("tools.generate_exam.generate_exam", return_value=exam), \
+         patch("tools.review_exam.review_exam_quality", return_value=review_result):
+        result = prefill_bank(10, configs)
+
+    assert result["success"] is True
+    assert "warned" in result["message"].lower() or "1 warned" in result["message"]
+    stats = get_bank_stats()
+    assert stats["warned"] == 1
+    assert stats["reviewed"] == 1
+
+
 def test_prefill_bank_generates_and_caches(db_path):
     """prefill_bank calls generate_exam, review_exam_quality, and cache_contexts."""
     from tools.question_bank import init_db, prefill_bank, get_bank_stats

@@ -440,32 +440,26 @@ def _build_exam_from_rows(rows: list) -> dict:
 
 
 def prefill_bank(num_questions: int, model_configs: dict) -> dict:
-    """
-    Generate and review one exam, then cache the validated contexts.
-    Contexts with critical issues are excluded; clean contexts are cached.
-
-    Args:
-        num_questions: Number of questions to generate
-        model_configs: Dict with 'generate' and 'review' keys mapping to ModelConfig
-
-    Returns:
-        dict with "success": bool and "message": str
-    """
+    """Generate, review, and cache contexts. Warned contexts get 'warned' status."""
     from tools.generate_exam import generate_exam
     from tools.review_exam import review_exam_quality
 
     exam = generate_exam(num_questions, model_config=model_configs["generate"])
     review = review_exam_quality(exam, model_config=model_configs["review"])
 
-    # Collect context IDs that have critical issues
+    # Collect context IDs with critical/warning issues
     critical_ctx_ids = set()
+    warned_ctx_ids = set()
     for f in review.get("flagged_questions", []):
+        ctx_id = f.get("context_id")
+        if not ctx_id:
+            continue
         if f.get("severity") == "critical":
-            ctx_id = f.get("context_id")
-            if ctx_id:
-                critical_ctx_ids.add(ctx_id)
+            critical_ctx_ids.add(ctx_id)
+        elif f.get("severity") == "warning":
+            warned_ctx_ids.add(ctx_id)
 
-    # Keep only contexts without critical issues
+    # Remove critical contexts
     clean_contexts = [
         ctx for ctx in exam.get("contexts", [])
         if ctx["context_id"] not in critical_ctx_ids
@@ -474,12 +468,27 @@ def prefill_bank(num_questions: int, model_configs: dict) -> dict:
     if not clean_contexts:
         return {"success": False, "message": "All generated contexts had critical quality issues. Try again."}
 
-    # Cache clean contexts
-    exam_to_cache = dict(exam)
-    exam_to_cache["contexts"] = clean_contexts
-    cache_contexts(exam_to_cache, status="reviewed")
+    # Split into warned and reviewed
+    warned_contexts = [ctx for ctx in clean_contexts if ctx["context_id"] in warned_ctx_ids]
+    reviewed_contexts = [ctx for ctx in clean_contexts if ctx["context_id"] not in warned_ctx_ids]
+
+    # Cache each group with appropriate status
+    if reviewed_contexts:
+        reviewed_exam = dict(exam)
+        reviewed_exam["contexts"] = reviewed_contexts
+        cache_contexts(reviewed_exam, status="reviewed")
+
+    if warned_contexts:
+        warned_exam = dict(exam)
+        warned_exam["contexts"] = warned_contexts
+        cache_contexts(warned_exam, status="warned")
+
     cached_q = sum(len(ctx.get("questions", [])) for ctx in clean_contexts)
-    msg = f"Cached {cached_q} questions from {len(clean_contexts)} contexts."
+    warned_count = len(warned_contexts)
+    msg = f"Cached {cached_q} questions from {len(clean_contexts)} contexts"
+    if warned_count:
+        msg += f" ({warned_count} warned)"
+    msg += "."
     if critical_ctx_ids:
         msg += f" ({len(critical_ctx_ids)} context(s) excluded due to quality issues.)"
     return {"success": True, "message": msg}
