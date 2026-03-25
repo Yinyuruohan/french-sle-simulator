@@ -97,7 +97,7 @@ def cache_contexts(exam_data: dict, status: str = "reviewed"):
                     "options": q["options"],
                     "correct_answer": q["correct_answer"],
                     "grammar_topic": q["grammar_topic"],
-                    "explanation": None,
+                    "explanation": q.get("explanation"),
                 })
 
             topics = ",".join(q["grammar_topic"] for q in questions)
@@ -137,12 +137,12 @@ def get_bank_stats() -> dict:
     finally:
         conn.close()
 
-    stats = {"total_contexts": 0, "total_questions": 0, "reviewed": 0, "battle_tested": 0}
+    stats = {"total_contexts": 0, "total_questions": 0, "reviewed": 0, "battle_tested": 0, "warned": 0}
     for row in rows:
         status, count, q_sum = row[0], row[1], row[2]
         stats["total_contexts"] += count
         stats["total_questions"] += q_sum
-        if status in ("reviewed", "battle_tested"):
+        if status in ("reviewed", "battle_tested", "warned"):
             stats[status] = count
 
     return stats

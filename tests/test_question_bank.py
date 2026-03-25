@@ -147,6 +147,56 @@ def test_cache_contexts_stores_correct_status(db_path):
     assert stats["battle_tested"] == 0
 
 
+def test_cache_contexts_preserves_explanations(db_path):
+    """cache_contexts preserves AI-generated explanations in questions_json."""
+    from tools.question_bank import init_db, cache_contexts
+    init_db()
+    exam = _make_exam(1)
+    # Add explanations to questions (as generate_exam will now produce)
+    for ctx in exam["contexts"]:
+        for q in ctx["questions"]:
+            q["explanation"] = {"why_correct": "Reason", "grammar_rule": "Rule"}
+    cache_contexts(exam)
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT questions_json FROM contexts").fetchone()
+    conn.close()
+    questions = json.loads(row[0])
+    assert questions[0]["explanation"] == {"why_correct": "Reason", "grammar_rule": "Rule"}
+
+
+def test_cache_contexts_warned_status(db_path):
+    """cache_contexts stores warned status correctly."""
+    from tools.question_bank import init_db, cache_contexts, get_bank_stats
+    init_db()
+    exam = _make_exam(1)
+    cache_contexts(exam, status="warned")
+    stats = get_bank_stats()
+    assert stats["warned"] == 1
+    assert stats["reviewed"] == 0
+
+
+def test_get_bank_stats_includes_warned(db_path):
+    """get_bank_stats returns warned count alongside reviewed and battle_tested."""
+    from tools.question_bank import init_db, cache_contexts, get_bank_stats
+    init_db()
+    exam1 = _make_exam(1)
+    cache_contexts(exam1, status="reviewed")
+    exam2 = {
+        "session_id": "s2", "timestamp": "t", "num_questions": 1,
+        "contexts": [{
+            "context_id": 1, "type": "fill_in_blank",
+            "passage": "Different passage for warned context.",
+            "questions": [{"question_id": 1, "options": {"A": "a", "B": "b", "C": "c", "D": "d"},
+                          "correct_answer": "A", "grammar_topic": "tense"}],
+        }],
+    }
+    cache_contexts(exam2, status="warned")
+    stats = get_bank_stats()
+    assert stats["reviewed"] == 1
+    assert stats["warned"] == 1
+
+
 # ── Task 3: upgrade_to_battle_tested ────────────────────────────────────────
 
 def test_upgrade_to_battle_tested(db_path):
