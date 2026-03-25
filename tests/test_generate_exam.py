@@ -63,3 +63,61 @@ def test_regenerate_context_uses_model_config(monkeypatch):
     mock_openai.assert_called_once_with(api_key="regen-key", base_url="https://regen.example.com")
     call_kwargs = mock_client.chat.completions.create.call_args
     assert call_kwargs.kwargs.get("model") == "regen-model" or call_kwargs[1].get("model") == "regen-model"
+
+
+def test_generate_exam_prompt_requests_explanations():
+    """The generation prompt asks for explanation with why_correct and grammar_rule."""
+    from tools.generate_exam import SYSTEM_PROMPT, FEW_SHOT_EXAMPLES
+    combined = SYSTEM_PROMPT + FEW_SHOT_EXAMPLES
+    assert "explanation" in combined.lower()
+    assert "why_correct" in combined.lower()
+    assert "grammar_rule" in combined.lower()
+
+
+def test_generate_exam_max_tokens_16000():
+    """generate_exam uses max_tokens=16000."""
+    from unittest.mock import patch, MagicMock
+    from tools.model_config import ModelConfig
+
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].finish_reason = "stop"
+    mock_response.choices[0].message.content = '{"contexts": []}'
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+
+    cfg = ModelConfig(api_key="test", base_url="http://test", model="test")
+    with patch("tools.generate_exam.OpenAI", return_value=mock_client):
+        from tools.generate_exam import generate_exam
+        generate_exam(5, model_config=cfg)
+
+    call_kwargs = mock_client.chat.completions.create.call_args[1]
+    assert call_kwargs["max_tokens"] == 16000
+
+
+def test_generate_exam_question_limits():
+    """num_questions is capped at 20 max and 2 min."""
+    from unittest.mock import patch, MagicMock
+    from tools.model_config import ModelConfig
+
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].finish_reason = "stop"
+    mock_response.choices[0].message.content = '{"contexts": []}'
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+
+    cfg = ModelConfig(api_key="test", base_url="http://test", model="test")
+    with patch("tools.generate_exam.OpenAI", return_value=mock_client):
+        from tools.generate_exam import generate_exam
+        # Test max cap
+        generate_exam(50, model_config=cfg)
+        prompt = mock_client.chat.completions.create.call_args[1]["messages"][1]["content"]
+        assert "20 total questions" in prompt or "exactly 20" in prompt
+
+        # Test min cap
+        generate_exam(1, model_config=cfg)
+        prompt = mock_client.chat.completions.create.call_args[1]["messages"][1]["content"]
+        assert "2 total questions" in prompt or "exactly 2" in prompt

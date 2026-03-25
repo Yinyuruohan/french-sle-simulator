@@ -37,13 +37,21 @@ EXAMPLE (2 fill_in_blank contexts + 1 error_identification context):
           "question_id": 1,
           "options": {"A": "du", "B": "à", "C": "pour", "D": "de"},
           "correct_answer": "D",
-          "grammar_topic": "preposition"
+          "grammar_topic": "preposition",
+          "explanation": {
+            "why_correct": "The expression 'avoir besoin de' requires the preposition 'de' before an infinitive.",
+            "grammar_rule": "After 'avoir besoin', use 'de' + infinitive (e.g., 'J'ai besoin de savoir')."
+          }
         },
         {
           "question_id": 2,
           "options": {"A": "que ce sera", "B": "qu'elle aura", "C": "qu'il y aura", "D": "que se sera"},
           "correct_answer": "C",
-          "grammar_topic": "impersonal_expression"
+          "grammar_topic": "impersonal_expression",
+          "explanation": {
+            "why_correct": "The impersonal expression 'il y aura' (there will be) is needed to say someone will be present to replace the speaker.",
+            "grammar_rule": "Use 'il y a' (present) or 'il y aura' (future) for impersonal 'there is/will be' constructions."
+          }
         }
       ]
     },
@@ -56,7 +64,11 @@ EXAMPLE (2 fill_in_blank contexts + 1 error_identification context):
           "question_id": 3,
           "options": {"A": "leurs", "B": "lui", "C": "vous", "D": "leur"},
           "correct_answer": "C",
-          "grammar_topic": "pronoun"
+          "grammar_topic": "pronoun",
+          "explanation": {
+            "why_correct": "The sentence addresses the recipients directly ('je vous fais part'), so 'vous' is the correct indirect object pronoun here.",
+            "grammar_rule": "Use 'vous' as the indirect object pronoun when addressing a group or using formal register (e.g., 'je vous informe', 'je vous fais part')."
+          }
         }
       ]
     },
@@ -69,7 +81,11 @@ EXAMPLE (2 fill_in_blank contexts + 1 error_identification context):
           "question_id": 4,
           "options": {"A": "souhaitez poser", "B": "à jour", "C": "resources humaines", "D": "Aucun des choix offerts."},
           "correct_answer": "C",
-          "grammar_topic": "spelling"
+          "grammar_topic": "spelling",
+          "explanation": {
+            "why_correct": "The word 'resources' is misspelled; the correct French spelling is 'ressources' (with double 's').",
+            "grammar_rule": "The French noun is 'ressources humaines' (human resources), spelled with double 's' and double 's' — never 'resources'."
+          }
         }
       ]
     }
@@ -103,6 +119,7 @@ CRITICAL RULES:
 - Question numbering is CONTINUOUS across all contexts (never restart at 1)
 - Fill-in-the-blank contexts have 1 or 2 questions (blanks) each
 - Error identification contexts have exactly 1 question
+- For each question, include an "explanation" object with "why_correct" (1-2 sentences explaining why the correct answer is right) and "grammar_rule" (the specific grammar rule with a brief example). Do NOT reference option letters (A, B, C, D) in explanations — options are shuffled after generation so letter references would become incorrect.
 - Return ONLY valid JSON, no markdown, no code fences"""
 
 
@@ -173,7 +190,7 @@ def generate_exam(num_questions: int, model_config: ModelConfig = None) -> dict:
 
     client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
 
-    num_questions = max(5, min(40, num_questions))
+    num_questions = max(2, min(20, num_questions))
     num_fill_blank = round(num_questions * 0.5)   # 50% fill-in-blank
     num_error_id = num_questions - num_fill_blank
 
@@ -212,7 +229,8 @@ Return a JSON object with this exact structure:
           "question_id": 1,
           "options": {{"A": "option1", "B": "option2", "C": "option3", "D": "option4"}},
           "correct_answer": "D",
-          "grammar_topic": "topic"
+          "grammar_topic": "topic",
+          "explanation": {{"why_correct": "...", "grammar_rule": "..."}}
         }}
       ]
     }},
@@ -225,7 +243,8 @@ Return a JSON object with this exact structure:
           "question_id": 3,
           "options": {{"A": "segment text", "B": "segment text", "C": "segment text", "D": "Aucun des choix offerts."}},
           "correct_answer": "A",
-          "grammar_topic": "topic"
+          "grammar_topic": "topic",
+          "explanation": {{"why_correct": "...", "grammar_rule": "..."}}
         }}
       ]
     }}
@@ -252,7 +271,7 @@ IMPORTANT RULES:
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.7,
-            max_tokens=12000,
+            max_tokens=16000,
             response_format={"type": "json_object"}
         )
 
