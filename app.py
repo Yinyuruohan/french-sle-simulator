@@ -119,7 +119,8 @@ def render_setup():
     # Question bank status
     bank_stats = get_bank_stats()
     st.markdown(f"**Question bank:** {bank_stats['total_questions']} questions available "
-                f"({bank_stats['battle_tested']} battle-tested, {bank_stats['reviewed']} reviewed)")
+                f"({bank_stats['battle_tested']} battle-tested, {bank_stats['reviewed']} reviewed, "
+                f"{bank_stats.get('warned', 0)} warned)")
 
     col_prefill1, col_prefill2 = st.columns([3, 1])
     with col_prefill1:
@@ -312,6 +313,16 @@ def render_exam():
 
     contexts = exam.get("contexts", [])
 
+    # Show banner for warned cached contexts
+    warned_contexts = [ctx for ctx in contexts if ctx.get("bank_status") == "warned"]
+    if warned_contexts:
+        st.info(
+            "Some questions in this exam were flagged with minor quality warnings during generation. "
+            "They may contain ambiguities. / "
+            "Certaines questions ont été signalées avec des avertissements mineurs.",
+            icon="ℹ️"
+        )
+
     with st.form("exam_form"):
         user_answers = {}
 
@@ -414,12 +425,15 @@ def render_results():
 *Notation proportionnelle simplifiée. Ceci est une estimation non officielle.*
 """)
 
-    # Build set of flagged explanation question IDs
-    feedback_review = st.session_state.get("feedback_review")
+    # Build set of flagged explanation question IDs from exam review
+    exam_review = st.session_state.get("exam_review")
     flagged_expl_ids = {}
-    if feedback_review:
-        for f in feedback_review.get("flagged_explanations", []):
-            flagged_expl_ids[f["question_id"]] = f
+    if exam_review:
+        for f in exam_review.get("flagged_questions", []):
+            if f.get("category") in ("incorrect_rule", "wrong_reasoning",
+                                      "misleading_explanation", "hallucinated_rule",
+                                      "inconsistent_with_question"):
+                flagged_expl_ids[f["question_id"]] = f
 
     # Per-context results
     st.markdown("## Detailed Results / Résultats détaillés")
@@ -434,6 +448,9 @@ def render_results():
             f"Context {ctx_r['context_id']} — {ctx_type} ({ctx_correct}/{ctx_total})",
             expanded=any(not q["is_correct"] for q in ctx_r["question_results"])
         ):
+            if ctx_r.get("bank_status") == "warned":
+                st.caption("This question was flagged during quality review (warning) / "
+                           "Cette question a été signalée lors du contrôle qualité (avertissement)")
             st.markdown(ctx_r["passage"])
             st.markdown("")
 
@@ -498,7 +515,6 @@ def render_results():
         st.session_state.exam = None
         st.session_state.evaluation = None
         st.session_state.exam_review = None
-        st.session_state.feedback_review = None
         go_to("welcome")
         st.rerun()
 
