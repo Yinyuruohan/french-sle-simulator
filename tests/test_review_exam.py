@@ -71,3 +71,28 @@ def test_structural_mismatch_clean_exam():
 
     flags = _check_structural_mismatch(exam)
     assert flags == []
+
+
+def test_enforce_severity_all_ai_categories_are_warnings():
+    """All AI-judgment categories are capped at warning severity."""
+    from tools.review_exam import _enforce_severity_rules, EXAM_WARNING_ONLY_CATEGORIES
+
+    ai_categories = [
+        "wrong_answer_key", "multiple_correct", "no_real_error",
+        "passage_grammar_error", "weak_distractor", "topic_mismatch",
+        "incorrect_rule", "wrong_reasoning", "misleading_explanation",
+        "hallucinated_rule", "inconsistent_with_question",
+    ]
+    for cat in ai_categories:
+        assert cat in EXAM_WARNING_ONLY_CATEGORIES, f"{cat} should be in EXAM_WARNING_ONLY_CATEGORIES"
+
+    flags = [{"category": cat, "severity": "critical"} for cat in ai_categories]
+    result = _enforce_severity_rules(flags, EXAM_WARNING_ONLY_CATEGORIES)
+    for f in result:
+        assert f["severity"] == "warning", f"{f['category']} was not downgraded to warning"
+
+
+def test_review_feedback_quality_removed():
+    """review_feedback_quality should no longer exist."""
+    import tools.review_exam as rm
+    assert not hasattr(rm, "review_feedback_quality")
