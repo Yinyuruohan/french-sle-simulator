@@ -80,10 +80,10 @@ def render_setup():
 
     num_questions = st.number_input(
         "How many questions? / Combien de questions ?",
-        min_value=5,
-        max_value=40,
+        min_value=2,
+        max_value=20,
         value=10,
-        step=5,
+        step=1,
         help="The official exam has 40 questions. / L'examen officiel comporte 40 questions."
     )
 
@@ -138,48 +138,30 @@ def render_setup():
                 api_key=api_key or cfg.api_key,
             )
 
-    col1, col2 = st.columns(2)
+    # Check cache availability for button labels
+    bank_stats = get_bank_stats()
+    has_bank = bank_stats["total_questions"] > 0
+
+    col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("← Back / Retour", use_container_width=True):
             go_to("welcome")
             st.rerun()
     with col2:
-        if st.button("Start exam / Commencer l'examen", type="primary", use_container_width=True):
-            # Try cache first
+        bank_disabled = not has_bank
+        if st.button("Instant exam (from bank)", use_container_width=True, disabled=bank_disabled):
             cache_result = assemble_exam_from_cache(num_questions)
-
-            if cache_result["exam"] is not None and cache_result["exam"]["num_questions"] >= num_questions:
-                # Full cache hit — serve instantly
+            if cache_result["exam"] is not None:
                 st.session_state.exam = cache_result["exam"]
                 st.session_state.exam_review = {"passed": True, "flagged_questions": [], "summary": "Served from cache."}
                 go_to("exam")
                 st.rerun()
-            elif cache_result["exam"] is not None:
-                # Partial cache hit — assembler returned a shorter exam
-                st.session_state.cache_exam = cache_result["exam"]
-                st.session_state.requested_questions = num_questions
             else:
-                # Empty cache — go straight to fresh generation
-                st.session_state.generate_fresh = True
-
-    # Choice dialog when cache returned a shorter exam
-    if st.session_state.get("cache_exam"):
-        cached_exam = st.session_state.cache_exam
-        avail = cached_exam["num_questions"]
-        requested = st.session_state.requested_questions
-        st.info(f"{avail} questions available in bank (you requested {requested}). Choose an option:", icon="📦")
-        col_cache, col_fresh = st.columns(2)
-        with col_cache:
-            if st.button(f"Take instant exam ({avail} questions)", use_container_width=True):
-                st.session_state.exam = cached_exam
-                st.session_state.cache_exam = None
-                st.session_state.exam_review = {"passed": True, "flagged_questions": [], "summary": "Served from cache."}
-                go_to("exam")
-                st.rerun()
-        with col_fresh:
-            if st.button(f"Generate fresh ({requested} questions)", use_container_width=True):
-                st.session_state.cache_exam = None
-                st.session_state.generate_fresh = True
+                st.warning("Not enough questions in bank. Use 'Generate fresh' instead.")
+    with col3:
+        if st.button("Generate fresh (API)", type="primary", use_container_width=True):
+            st.session_state.generate_fresh = True
+            st.session_state.requested_questions = num_questions
 
     # Fresh generation path (existing pipeline)
     if st.session_state.get("generate_fresh"):
@@ -337,25 +319,6 @@ def render_exam():
         if submitted:
             st.session_state.user_answers = user_answers
 
-    # Per-context flag UI (outside the form since Streamlit forms don't support nested buttons)
-    st.markdown("---")
-    for ctx in contexts:
-        with st.expander(f"Flag quality issue — Context {ctx['context_id']}", expanded=False):
-            flag_category = st.selectbox(
-                "Category",
-                ["Wrong answer key", "Multiple correct answers", "Unclear passage",
-                 "Bad explanation", "Other"],
-                key=f"flag_cat_{ctx['context_id']}",
-            )
-            if st.button("Submit flag", key=f"flag_btn_{ctx['context_id']}"):
-                bank_ctx_id = ctx.get("bank_context_id")
-                p_hash = ctx.get("original_passage_hash")
-                if bank_ctx_id or p_hash:
-                    flag_context(bank_context_id=bank_ctx_id, passage_hash=p_hash, category=flag_category)
-                    st.success("Flag submitted. This context will be deprioritized in future exams.")
-                else:
-                    st.warning("Cannot flag this context (no bank reference).")
-
     if hasattr(st.session_state, "user_answers") and st.session_state.get("user_answers"):
         answers = st.session_state.user_answers
         st.session_state.user_answers = None
@@ -501,6 +464,25 @@ def render_results():
                             )
 
                 st.markdown("")
+
+            # Per-context flag UI
+            st.markdown("---")
+            flag_category = st.selectbox(
+                "Flag quality issue / Signaler un problème",
+                ["Wrong answer key", "Multiple correct answers", "Unclear passage",
+                 "Bad explanation", "Other"],
+                key=f"flag_cat_{ctx_r['context_id']}",
+            )
+            if st.button("Submit flag / Soumettre", key=f"flag_btn_{ctx_r['context_id']}"):
+                bank_ctx_id = ctx_r.get("bank_context_id")
+                p_hash = ctx_r.get("original_passage_hash")
+                if bank_ctx_id or p_hash:
+                    flag_context(bank_context_id=bank_ctx_id, passage_hash=p_hash, category=flag_category)
+                    st.success("Flag submitted. This context will be deprioritized in future exams. / "
+                               "Signalement soumis. Ce contexte sera déprioritisé.")
+                else:
+                    st.warning("Cannot flag this context (not yet in the question bank). / "
+                               "Impossible de signaler ce contexte (pas encore dans la banque).")
 
     st.divider()
 

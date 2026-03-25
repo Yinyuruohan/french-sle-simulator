@@ -189,7 +189,9 @@ def flag_context(bank_context_id: str = None, passage_hash: str = None, category
 def upgrade_to_battle_tested(source_session: str, evaluation: dict):
     """Upgrade cached contexts from 'reviewed' to 'battle_tested'.
     Explanations are already stored in questions_json from generation.
-    Only 'reviewed' contexts upgrade — 'warned' contexts stay permanently."""
+    Only 'reviewed' contexts upgrade — 'warned' contexts stay permanently.
+    Matches by bank_context_id or passage_hash (not source_session, which
+    differs for cached exams that get a new session_id at assembly)."""
     # Build set of context identifiers from evaluation for matching
     bank_ids = set()
     hash_ids = set()
@@ -201,20 +203,23 @@ def upgrade_to_battle_tested(source_session: str, evaluation: dict):
         p_hash = orig_hash or _passage_hash(ctx_r["passage"])
         hash_ids.add(p_hash)
 
+    if not bank_ids and not hash_ids:
+        return
+
     conn = _get_conn()
     try:
-        rows = conn.execute(
-            "SELECT context_id, passage_hash FROM contexts WHERE source_session = ? AND status = 'reviewed'",
-            (source_session,),
-        ).fetchall()
-
-        for row in rows:
-            ctx_id, p_hash = row[0], row[1]
-            if ctx_id in bank_ids or p_hash in hash_ids:
-                conn.execute(
-                    "UPDATE contexts SET status = 'battle_tested' WHERE context_id = ?",
-                    (ctx_id,),
-                )
+        # Match by bank_context_id first, then fall back to passage_hash
+        for bank_id in bank_ids:
+            conn.execute(
+                "UPDATE contexts SET status = 'battle_tested' WHERE context_id = ? AND status = 'reviewed'",
+                (bank_id,),
+            )
+        # Also match by passage_hash for contexts without bank_context_id
+        for p_hash in hash_ids:
+            conn.execute(
+                "UPDATE contexts SET status = 'battle_tested' WHERE passage_hash = ? AND status = 'reviewed'",
+                (p_hash,),
+            )
         conn.commit()
     finally:
         conn.close()
