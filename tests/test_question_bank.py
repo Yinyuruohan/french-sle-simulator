@@ -520,6 +520,81 @@ def test_update_last_incorrect_falls_back_to_hash(db_path):
     assert row[0] == 1
 
 
+def test_assemble_prefers_battle_tested_over_warned(db_path):
+    """Assembly ordering prefers battle_tested > reviewed > warned."""
+    from tools.question_bank import init_db, assemble_exam_from_cache
+    init_db()
+
+    conn = sqlite3.connect(db_path)
+    now = "2026-03-25T00:00:00"
+    # Insert 3 fill_in_blank contexts: battle_tested, reviewed, warned — all same topic
+    for i, (status, passage) in enumerate([
+        ("warned", "Warned passage (1) _______________ here."),
+        ("reviewed", "Reviewed passage (1) _______________ here."),
+        ("battle_tested", "Battle tested passage (1) _______________ here."),
+    ]):
+        q_json = json.dumps([{"options": {"A": "a", "B": "b", "C": "c", "D": "d"},
+                              "correct_answer": "A", "grammar_topic": "agreement",
+                              "explanation": {"why_correct": "R", "grammar_rule": "G"}}])
+        conn.execute(
+            "INSERT INTO contexts VALUES (?, 'fill_in_blank', ?, ?, 1, 'agreement', ?, 's', ?, 0, ?, 0, 0)",
+            (f"ctx_{i}", passage, q_json, status, now, f"hash_{i}")
+        )
+    # Also add error_identification contexts so assembly can build a valid exam
+    for i in range(3, 6):
+        q_json = json.dumps([{"options": {"A": "seg1", "B": "seg2", "C": "seg3", "D": "Aucun des choix offerts."},
+                              "correct_answer": "A", "grammar_topic": "spelling",
+                              "explanation": {"why_correct": "R", "grammar_rule": "G"}}])
+        conn.execute(
+            "INSERT INTO contexts VALUES (?, 'error_identification', ?, ?, 1, 'spelling', 'reviewed', 's', ?, 0, ?, 0, 0)",
+            (f"ctx_{i}", f"Error passage {i}", q_json, now, f"hash_{i}")
+        )
+    conn.commit()
+    conn.close()
+
+    result = assemble_exam_from_cache(2)
+    exam = result["exam"]
+    assert exam is not None
+    # The fill_in_blank context chosen should be battle_tested (preferred)
+    fill_ctxs = [c for c in exam["contexts"] if c["type"] == "fill_in_blank"]
+    assert len(fill_ctxs) == 1
+    assert fill_ctxs[0]["bank_status"] == "battle_tested"
+
+
+def test_assemble_exam_includes_bank_status(db_path):
+    """Assembled exam contexts include bank_status field."""
+    from tools.question_bank import init_db, cache_contexts, assemble_exam_from_cache
+    init_db()
+    # Use the existing _make_large_exam helper if it exists, or create contexts manually
+    # We need enough contexts for assembly - at least some fill_in_blank and error_identification
+    conn = sqlite3.connect(db_path)
+    now = "2026-03-25T00:00:00"
+    for i in range(3):
+        q_json = json.dumps([{"options": {"A": "a", "B": "b", "C": "c", "D": "d"},
+                              "correct_answer": "A", "grammar_topic": "agreement",
+                              "explanation": {"why_correct": "R", "grammar_rule": "G"}}])
+        conn.execute(
+            "INSERT INTO contexts VALUES (?, 'fill_in_blank', ?, ?, 1, 'agreement', 'reviewed', 's', ?, 0, ?, 0, 0)",
+            (f"fill_{i}", f"Fill passage {i} (1) _______________ here.", q_json, now, f"fhash_{i}")
+        )
+    for i in range(3):
+        q_json = json.dumps([{"options": {"A": "seg1", "B": "seg2", "C": "seg3", "D": "Aucun des choix offerts."},
+                              "correct_answer": "A", "grammar_topic": "spelling",
+                              "explanation": {"why_correct": "R", "grammar_rule": "G"}}])
+        conn.execute(
+            "INSERT INTO contexts VALUES (?, 'error_identification', ?, ?, 1, 'spelling', 'reviewed', 's', ?, 0, ?, 0, 0)",
+            (f"err_{i}", f"Error passage {i}", q_json, now, f"ehash_{i}")
+        )
+    conn.commit()
+    conn.close()
+
+    result = assemble_exam_from_cache(4)
+    assert result["exam"] is not None
+    for ctx in result["exam"]["contexts"]:
+        assert "bank_status" in ctx
+        assert ctx["bank_status"] in ("reviewed", "warned", "battle_tested")
+
+
 def test_update_last_incorrect_resets_from_one_to_zero(db_path):
     """update_last_incorrect resets flag from 1 to 0 on a subsequent all-correct attempt."""
     from tools.question_bank import init_db, cache_contexts, update_last_incorrect

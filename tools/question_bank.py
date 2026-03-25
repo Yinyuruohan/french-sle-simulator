@@ -263,14 +263,22 @@ def assemble_exam_from_cache(num_questions: int) -> dict:
         if num_fill + num_err == 0:
             return {"available_questions": available, "exam": None}
 
-        # Fetch all contexts grouped by type, weighted random (least-served first)
+        # Fetch all contexts grouped by type, quality-preferred then least-served
         fill_rows = conn.execute(
-            "SELECT context_id, type, passage, questions_json, num_questions, grammar_topics "
-            "FROM contexts WHERE type = 'fill_in_blank' ORDER BY times_served ASC, RANDOM()"
+            "SELECT context_id, type, passage, questions_json, num_questions, grammar_topics, status, user_flags "
+            "FROM contexts WHERE type = 'fill_in_blank' "
+            "ORDER BY "
+            "  CASE WHEN user_flags >= 1 THEN 1 ELSE 0 END, "
+            "  CASE status WHEN 'battle_tested' THEN 0 WHEN 'reviewed' THEN 1 WHEN 'warned' THEN 2 END, "
+            "  times_served ASC, RANDOM()"
         ).fetchall()
         err_rows = conn.execute(
-            "SELECT context_id, type, passage, questions_json, num_questions, grammar_topics "
-            "FROM contexts WHERE type = 'error_identification' ORDER BY times_served ASC, RANDOM()"
+            "SELECT context_id, type, passage, questions_json, num_questions, grammar_topics, status, user_flags "
+            "FROM contexts WHERE type = 'error_identification' "
+            "ORDER BY "
+            "  CASE WHEN user_flags >= 1 THEN 1 ELSE 0 END, "
+            "  CASE status WHEN 'battle_tested' THEN 0 WHEN 'reviewed' THEN 1 WHEN 'warned' THEN 2 END, "
+            "  times_served ASC, RANDOM()"
         ).fetchall()
 
         # Select contexts with even topic distribution
@@ -302,7 +310,7 @@ def _select_contexts_evenly(rows: list, target_questions: int) -> list:
     Uses best-fit strategy: (1) try exact match, (2) try target-1, (3) allow target+1.
     Never exceeds target by more than 1.
 
-    Each row is: (context_id, type, passage, questions_json, num_questions, grammar_topics)
+    Each row is: (context_id, type, passage, questions_json, num_questions, grammar_topics, status, user_flags)
     """
     if not rows or target_questions <= 0:
         return []
@@ -365,14 +373,14 @@ def _build_exam_from_rows(rows: list) -> dict:
     Renumbers context_ids, question_ids, and passage blank markers.
     Stores original_passage_hash as fallback for post-exam matching.
 
-    Each row is: (context_id, type, passage, questions_json, num_questions, grammar_topics)
+    Each row is: (context_id, type, passage, questions_json, num_questions, grammar_topics, status, user_flags)
     """
     contexts = []
     question_id = 1
     blank_pattern = re.compile(r"\((\d+)\)\s*_+")
 
     for ctx_idx, row in enumerate(rows, start=1):
-        db_ctx_id, ctx_type, passage, questions_json_str, num_q, topics = row
+        db_ctx_id, ctx_type, passage, questions_json_str, num_q, topics, status, user_flags = row
         questions = json.loads(questions_json_str)
 
         # Store original passage hash before any renumbering (fallback for post-exam matching)
@@ -414,6 +422,7 @@ def _build_exam_from_rows(rows: list) -> dict:
             "questions": new_questions,
             "bank_context_id": db_ctx_id,
             "original_passage_hash": orig_p_hash,
+            "bank_status": status,
         })
 
         question_id += len(questions)
