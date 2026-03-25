@@ -237,13 +237,18 @@ def test_upgrade_to_battle_tested(db_path):
 
 
 def test_upgrade_skips_when_explanations_missing(db_path):
-    """Contexts stay 'reviewed' if not all questions have explanations."""
+    """upgrade_to_battle_tested upgrades matched reviewed contexts regardless of eval explanations.
+    Explanations are pre-stored in questions_json at cache time, not sourced from eval."""
     from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, get_bank_stats
     init_db()
     exam = _make_exam(1)
+    # Pre-populate explanations in questions_json at cache time (new design)
+    for ctx in exam["contexts"]:
+        for q in ctx["questions"]:
+            q["explanation"] = {"why_correct": "R1", "grammar_rule": "G1"}
     cache_contexts(exam)
 
-    # Evaluation with one explanation missing (None)
+    # Evaluation with missing eval explanations — upgrade should still work
     evaluation = {
         "session_id": exam["session_id"],
         "context_results": [
@@ -255,12 +260,12 @@ def test_upgrade_skips_when_explanations_missing(db_path):
                     {
                         "question_id": 1,
                         "is_correct": True,
-                        "explanation": {"why_correct": "R1", "grammar_rule": "G1"},
+                        "explanation": None,  # eval explanation absent — OK in new design
                     },
                     {
                         "question_id": 2,
                         "is_correct": True,
-                        "explanation": None,  # missing
+                        "explanation": None,
                     },
                 ],
             }
@@ -269,8 +274,8 @@ def test_upgrade_skips_when_explanations_missing(db_path):
 
     upgrade_to_battle_tested(exam["session_id"], evaluation)
     stats = get_bank_stats()
-    assert stats["reviewed"] == 1
-    assert stats["battle_tested"] == 0
+    assert stats["battle_tested"] == 1
+    assert stats["reviewed"] == 0
 
 
 # ── Task 4: assemble_exam_from_cache ────────────────────────────────────────
@@ -368,9 +373,13 @@ def test_assemble_exam_battle_tested_carries_explanations(db_path):
     from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, assemble_exam_from_cache
     init_db()
     exam = _make_large_exam()
+    # Pre-populate explanations in questions_json at cache time (new design)
+    for ctx in exam["contexts"]:
+        for q in ctx["questions"]:
+            q["explanation"] = {"why_correct": "Reason", "grammar_rule": "Rule"}
     cache_contexts(exam)
 
-    # Upgrade all contexts with explanations
+    # Upgrade all contexts — eval explanations not required in new design
     evaluation = {"session_id": exam["session_id"], "context_results": []}
     for ctx in exam["contexts"]:
         ctx_r = {"context_id": ctx["context_id"], "type": ctx["type"], "passage": ctx["passage"], "question_results": []}
@@ -378,7 +387,7 @@ def test_assemble_exam_battle_tested_carries_explanations(db_path):
             ctx_r["question_results"].append({
                 "question_id": q["question_id"],
                 "is_correct": False,
-                "explanation": {"why_correct": "Reason", "grammar_rule": "Rule"},
+                "explanation": None,
             })
         evaluation["context_results"].append(ctx_r)
     upgrade_to_battle_tested(exam["session_id"], evaluation)
@@ -593,6 +602,100 @@ def test_assemble_exam_includes_bank_status(db_path):
     for ctx in result["exam"]["contexts"]:
         assert "bank_status" in ctx
         assert ctx["bank_status"] in ("reviewed", "warned", "battle_tested")
+
+
+def test_flag_context_increments_user_flags(db_path):
+    """flag_context increments user_flags for the specified context."""
+    from tools.question_bank import init_db, cache_contexts, flag_context
+    init_db()
+    exam = _make_exam(1)
+    cache_contexts(exam)
+
+    conn = sqlite3.connect(db_path)
+    bank_id = conn.execute("SELECT context_id FROM contexts").fetchone()[0]
+    conn.close()
+
+    flag_context(bank_context_id=bank_id, category="Wrong answer key")
+
+    conn = sqlite3.connect(db_path)
+    flags = conn.execute("SELECT user_flags FROM contexts WHERE context_id = ?", (bank_id,)).fetchone()[0]
+    conn.close()
+    assert flags == 1
+
+
+def test_flag_context_by_passage_hash(db_path):
+    """flag_context works with passage_hash fallback."""
+    from tools.question_bank import init_db, cache_contexts, flag_context
+    init_db()
+    exam = _make_exam(1)
+    cache_contexts(exam)
+
+    conn = sqlite3.connect(db_path)
+    p_hash = conn.execute("SELECT passage_hash FROM contexts").fetchone()[0]
+    conn.close()
+
+    flag_context(passage_hash=p_hash, category="Unclear passage")
+
+    conn = sqlite3.connect(db_path)
+    flags = conn.execute("SELECT user_flags FROM contexts WHERE passage_hash = ?", (p_hash,)).fetchone()[0]
+    conn.close()
+    assert flags == 1
+
+
+def test_upgrade_skips_warned_contexts(db_path):
+    """upgrade_to_battle_tested does not upgrade warned contexts."""
+    from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, get_bank_stats
+    init_db()
+    exam = _make_exam(1)
+    for ctx in exam["contexts"]:
+        for q in ctx["questions"]:
+            q["explanation"] = {"why_correct": "R", "grammar_rule": "G"}
+    cache_contexts(exam, status="warned")
+
+    evaluation = {
+        "session_id": exam["session_id"],
+        "context_results": [{
+            "context_id": 1, "type": "fill_in_blank",
+            "passage": exam["contexts"][0]["passage"],
+            "question_results": [
+                {"question_id": 1, "is_correct": True,
+                 "explanation": {"why_correct": "R", "grammar_rule": "G"}},
+                {"question_id": 2, "is_correct": True,
+                 "explanation": {"why_correct": "R", "grammar_rule": "G"}},
+            ],
+        }],
+    }
+    upgrade_to_battle_tested(exam["session_id"], evaluation)
+    stats = get_bank_stats()
+    assert stats["warned"] == 1
+    assert stats["battle_tested"] == 0
+
+
+def test_upgrade_no_longer_requires_explanations_from_eval(db_path):
+    """upgrade_to_battle_tested flips status without needing eval explanations."""
+    from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, get_bank_stats
+    init_db()
+    exam = _make_exam(1)
+    for ctx in exam["contexts"]:
+        for q in ctx["questions"]:
+            q["explanation"] = {"why_correct": "R", "grammar_rule": "G"}
+    cache_contexts(exam, status="reviewed")
+
+    # Evaluation without explanations — upgrade should still work
+    evaluation = {
+        "session_id": exam["session_id"],
+        "context_results": [{
+            "context_id": 1, "type": "fill_in_blank",
+            "passage": exam["contexts"][0]["passage"],
+            "question_results": [
+                {"question_id": 1, "is_correct": True, "explanation": None},
+                {"question_id": 2, "is_correct": True, "explanation": None},
+            ],
+        }],
+    }
+    upgrade_to_battle_tested(exam["session_id"], evaluation)
+    stats = get_bank_stats()
+    assert stats["battle_tested"] == 1
 
 
 def test_update_last_incorrect_resets_from_one_to_zero(db_path):
