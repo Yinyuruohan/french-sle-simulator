@@ -42,26 +42,6 @@ def go_to(stage):
     st.session_state.stage = stage
 
 
-def _log_incorrect_to_tracking(exam, answers, evaluation):
-    """Log incorrect answers to user error tracking file."""
-    from tools.evaluate_exam import append_to_tracking
-    incorrect_items = []
-    for ctx in exam.get("contexts", []):
-        for q in ctx.get("questions", []):
-            user_ans = answers.get(q["question_id"], "")
-            if user_ans != q["correct_answer"]:
-                incorrect_items.append({
-                    "question": q,
-                    "passage": ctx["passage"],
-                    "user_answer": user_ans,
-                })
-    explanations = {}
-    for ctx_r in evaluation.get("context_results", []):
-        for q_r in ctx_r.get("question_results", []):
-            explanations[q_r["question_id"]] = q_r.get("explanation", {})
-    append_to_tracking(exam["session_id"], incorrect_items, explanations)
-
-
 # ── Welcome ──────────────────────────────────────────────────────────────────
 
 def render_welcome():
