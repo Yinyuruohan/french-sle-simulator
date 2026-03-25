@@ -25,9 +25,20 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def init_db():
-    """Create the question bank database and table if they don't exist."""
+    """Create the question bank database and table if they don't exist.
+    Detects old schema (missing user_flags) and recreates from scratch."""
     conn = _get_conn()
     try:
+        # Check if table exists and has correct schema
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='contexts'"
+        )
+        if cursor.fetchone():
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(contexts)").fetchall()}
+            if "user_flags" not in cols:
+                conn.execute("DROP TABLE contexts")
+                conn.commit()
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS contexts (
                 context_id TEXT PRIMARY KEY,
@@ -41,7 +52,8 @@ def init_db():
                 created_at TEXT NOT NULL,
                 times_served INTEGER NOT NULL DEFAULT 0,
                 passage_hash TEXT NOT NULL,
-                last_incorrect INTEGER NOT NULL DEFAULT 0
+                last_incorrect INTEGER NOT NULL DEFAULT 0,
+                user_flags INTEGER NOT NULL DEFAULT 0
             )
         """)
         conn.commit()
@@ -422,8 +434,7 @@ def _build_exam_from_rows(rows: list) -> dict:
 def prefill_bank(num_questions: int, model_configs: dict) -> dict:
     """
     Generate and review one exam, then cache the validated contexts.
-    Critical issues trigger regeneration (max 1 retry per context).
-    Contexts that remain critical after retry are excluded; clean contexts are cached.
+    Contexts with critical issues are excluded; clean contexts are cached.
 
     Args:
         num_questions: Number of questions to generate
@@ -432,54 +443,37 @@ def prefill_bank(num_questions: int, model_configs: dict) -> dict:
     Returns:
         dict with "success": bool and "message": str
     """
-    from tools.generate_exam import generate_exam, regenerate_context
+    from tools.generate_exam import generate_exam
     from tools.review_exam import review_exam_quality
 
     exam = generate_exam(num_questions, model_config=model_configs["generate"])
     review = review_exam_quality(exam, model_config=model_configs["review"])
 
-    # Group critical issues by context_id
-    critical_by_ctx = {}
+    # Collect context IDs that have critical issues
+    critical_ctx_ids = set()
     for f in review.get("flagged_questions", []):
         if f.get("severity") == "critical":
             ctx_id = f.get("context_id")
             if ctx_id:
-                critical_by_ctx.setdefault(ctx_id, []).append(f)
+                critical_ctx_ids.add(ctx_id)
 
-    # Attempt regeneration for each critical context (max 1 retry)
-    failed_ctx_ids = set()
-    if critical_by_ctx:
-        for ctx_id, issues in critical_by_ctx.items():
-            for i, ctx in enumerate(exam["contexts"]):
-                if ctx["context_id"] == ctx_id:
-                    start_qid = ctx["questions"][0]["question_id"]
-                    try:
-                        new_ctx = regenerate_context(
-                            ctx, exam["contexts"], start_qid, issues,
-                            model_config=model_configs["generate"]
-                        )
-                        exam["contexts"][i] = new_ctx
-                    except Exception:
-                        failed_ctx_ids.add(ctx_id)
-                    break
-
-    # Exclude contexts that still have critical issues after retry
+    # Keep only contexts without critical issues
     clean_contexts = [
         ctx for ctx in exam.get("contexts", [])
-        if ctx["context_id"] not in failed_ctx_ids
+        if ctx["context_id"] not in critical_ctx_ids
     ]
 
     if not clean_contexts:
-        return {"success": False, "message": "Generated exam had critical quality issues and was not cached. Try again."}
+        return {"success": False, "message": "All generated contexts had critical quality issues. Try again."}
 
-    # Cache only clean contexts
+    # Cache clean contexts
     exam_to_cache = dict(exam)
     exam_to_cache["contexts"] = clean_contexts
     cache_contexts(exam_to_cache, status="reviewed")
     cached_q = sum(len(ctx.get("questions", [])) for ctx in clean_contexts)
     msg = f"Cached {cached_q} questions from {len(clean_contexts)} contexts."
-    if failed_ctx_ids:
-        msg += f" ({len(failed_ctx_ids)} context(s) excluded due to quality issues.)"
+    if critical_ctx_ids:
+        msg += f" ({len(critical_ctx_ids)} context(s) excluded due to quality issues.)"
     return {"success": True, "message": msg}
 
 

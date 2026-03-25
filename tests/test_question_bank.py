@@ -18,7 +18,7 @@ def db_path(tmp_path):
 
 
 def test_init_db_creates_table(db_path):
-    """init_db creates the contexts table with expected columns."""
+    """init_db creates the contexts table with expected columns including user_flags."""
     from tools.question_bank import init_db
     init_db()
     conn = sqlite3.connect(db_path)
@@ -27,8 +27,49 @@ def test_init_db_creates_table(db_path):
     conn.close()
     expected = {"context_id", "type", "passage", "questions_json", "num_questions",
                 "grammar_topics", "status", "source_session", "created_at",
-                "times_served", "passage_hash", "last_incorrect"}
+                "times_served", "passage_hash", "last_incorrect", "user_flags"}
     assert expected == columns
+
+
+def test_init_db_migrates_old_schema(db_path):
+    """init_db drops and recreates DB when user_flags column is missing."""
+    import sqlite3
+    from tools.question_bank import init_db
+    # Create old-schema table (no user_flags)
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE contexts (
+            context_id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            passage TEXT NOT NULL,
+            questions_json TEXT NOT NULL,
+            num_questions INTEGER NOT NULL,
+            grammar_topics TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'reviewed',
+            source_session TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            times_served INTEGER NOT NULL DEFAULT 0,
+            passage_hash TEXT NOT NULL,
+            last_incorrect INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    conn.execute("INSERT INTO contexts VALUES ('old', 'fill_in_blank', 'p', '[]', 0, '', 'reviewed', 's', '2026-01-01', 0, 'h', 0)")
+    conn.commit()
+    conn.close()
+
+    # init_db should detect missing column and recreate
+    init_db()
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.execute("PRAGMA table_info(contexts)")
+    columns = {row[1] for row in cursor.fetchall()}
+    conn.close()
+    assert "user_flags" in columns
+    # Old data should be gone (DB was recreated)
+    conn = sqlite3.connect(db_path)
+    count = conn.execute("SELECT COUNT(*) FROM contexts").fetchone()[0]
+    conn.close()
+    assert count == 0
 
 
 def test_init_db_is_idempotent(db_path):
