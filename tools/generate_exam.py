@@ -480,11 +480,16 @@ Return a JSON object with this structure:
       "question_id": {start_question_id},
       "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}},
       "correct_answer": "A",
-      "grammar_topic": "..."
+      "grammar_topic": "...",
+      "explanation": {{
+        "why_correct": "...",
+        "grammar_rule": "..."
+      }}
     }}
   ]
 }}
 
+IMPORTANT: Do not reference option letters (A, B, C, D) in explanations.
 Return ONLY the JSON object."""
 
     response = client.chat.completions.create(
