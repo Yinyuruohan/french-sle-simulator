@@ -357,6 +357,25 @@ def render_exam():
         if submitted:
             st.session_state.user_answers = user_answers
 
+    # Per-context flag UI (outside the form since Streamlit forms don't support nested buttons)
+    st.markdown("---")
+    for ctx in contexts:
+        with st.expander(f"Flag quality issue — Context {ctx['context_id']}", expanded=False):
+            flag_category = st.selectbox(
+                "Category",
+                ["Wrong answer key", "Multiple correct answers", "Unclear passage",
+                 "Bad explanation", "Other"],
+                key=f"flag_cat_{ctx['context_id']}",
+            )
+            if st.button("Submit flag", key=f"flag_btn_{ctx['context_id']}"):
+                bank_ctx_id = ctx.get("bank_context_id")
+                p_hash = ctx.get("original_passage_hash")
+                if bank_ctx_id or p_hash:
+                    flag_context(bank_context_id=bank_ctx_id, passage_hash=p_hash, category=flag_category)
+                    st.success("Flag submitted. This context will be deprioritized in future exams.")
+                else:
+                    st.warning("Cannot flag this context (no bank reference).")
+
     if hasattr(st.session_state, "user_answers") and st.session_state.get("user_answers"):
         answers = st.session_state.user_answers
         st.session_state.user_answers = None
