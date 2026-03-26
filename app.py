@@ -395,7 +395,9 @@ def render_results():
             if f.get("category") in ("incorrect_rule", "wrong_reasoning",
                                       "misleading_explanation", "hallucinated_rule",
                                       "inconsistent_with_question"):
-                flagged_expl_ids[f["question_id"]] = f
+                qid = f.get("question_id")
+                if qid is not None:
+                    flagged_expl_ids[qid] = f
 
     # Per-context results
     st.markdown("## Detailed Results / Résultats détaillés")

@@ -2,8 +2,9 @@
 SLE Question Bank
 
 Caches validated exam contexts in a local SQLite database for instant
-exam assembly. Contexts are stored after passing quality review and
-upgraded with explanations after the full exam cycle completes.
+exam assembly. Contexts (including explanations) are stored after passing
+quality review. Reviewed contexts upgrade to battle_tested after a
+successful exam cycle.
 """
 
 import hashlib

@@ -177,7 +177,7 @@ def generate_exam(num_questions: int, model_config: ModelConfig = None) -> dict:
     Generate an SLE Written Expression exam with the given number of questions.
 
     Args:
-        num_questions: Total number of individual questions (5-40)
+        num_questions: Total number of individual questions (2-20)
         model_config: Optional ModelConfig; defaults to load_default_configs()["generate"]
 
     Returns:

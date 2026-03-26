@@ -160,17 +160,16 @@ def log_system_errors(session_id: str, review_type: str, review_result: dict):
 
     Args:
         session_id: The exam session ID
-        review_type: "exam_review" or "feedback_review"
-        review_result: The review dict with flagged_questions or flagged_explanations
+        review_type: "exam_review"
+        review_result: The review dict with flagged_questions
     """
-    flagged_key = "flagged_questions" if review_type == "exam_review" else "flagged_explanations"
-    flagged = review_result.get(flagged_key, [])
+    flagged = review_result.get("flagged_questions", [])
 
     if not flagged:
         return
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    review_label = "Exam Quality Review" if review_type == "exam_review" else "Feedback Quality Review"
+    review_label = "Exam Quality Review"
 
     lines = [
         f"\n## {review_label} — Session: {session_id}",
@@ -288,7 +287,7 @@ def review_exam_quality(exam_data: dict, model_config: ModelConfig = None) -> di
         return {
             "passed": not has_critical,
             "flagged_questions": deterministic_flags,
-            "summary": "API review skipped due to an error." + (f" Found {len(duplicate_flags)} duplicate option(s)." if duplicate_flags else ""),
+            "summary": "API review skipped due to an error." + (f" Found {len(deterministic_flags)} deterministic issue(s)." if deterministic_flags else ""),
         }
 
 
