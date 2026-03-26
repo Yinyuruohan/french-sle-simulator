@@ -1,20 +1,17 @@
 """
 SLE Written Expression Exam Evaluator
 
-Grades user answers against the answer key, generates detailed French grammar
-explanations for incorrect answers via DeepSeek API, computes SLE level,
-and logs errors to the persistent tracking file.
+Grades user answers against the answer key deterministically using pre-generated
+explanations embedded in the exam data. Computes SLE level and logs errors to the
+persistent tracking file.
 
 Works with the contexts→questions structure where each question uses A/B/C/D.
 """
 
-import json
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
-from openai import OpenAI
-from tools.model_config import ModelConfig, load_default_configs
 
 TMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".tmp")
 TRACKING_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "user_error_tracking.md")
@@ -37,107 +34,7 @@ def _determine_level(score_pct: float) -> str:
         return "Below A / Sous le niveau A"
 
 
-def _generate_explanations(incorrect_items: list, model_config: ModelConfig) -> dict:
-    """
-    Call DeepSeek API to generate structured grammar explanations.
-
-    Returns dict mapping question_id -> dict with keys:
-      why_incorrect, why_correct, grammar_rule
-    """
-    if not incorrect_items:
-        return {}
-
-    client = OpenAI(api_key=model_config.api_key, base_url=model_config.base_url)
-
-    is_regeneration = any("previous_explanation" in item for item in incorrect_items)
-
-    questions_text = ""
-    for item in incorrect_items:
-        q = item["question"]
-        opts = q["options"]
-        opts_str = " | ".join(f"{k}) {v}" for k, v in opts.items())
-        questions_text += f"""
-Question ({q['question_id']}) [{q['grammar_topic']}]:
-Context passage: {item['passage']}
-Options: {opts_str}
-Candidate chose: {item['user_answer']}) {opts[item['user_answer']]}
-Correct answer: {q['correct_answer']}) {opts[q['correct_answer']]}
-"""
-        # Include previous explanation and reviewer feedback when regenerating
-        prev_expl = item.get("previous_explanation")
-        flag = item.get("flagged_issue")
-        if prev_expl and flag:
-            if isinstance(prev_expl, dict):
-                questions_text += f"""
-PREVIOUS EXPLANATION (REJECTED BY REVIEWER):
-  why_incorrect: {prev_expl.get('why_incorrect', 'N/A')}
-  why_correct: {prev_expl.get('why_correct', 'N/A')}
-  grammar_rule: {prev_expl.get('grammar_rule', 'N/A')}
-REVIEWER FEEDBACK [{flag.get('category', 'unknown')}]: {flag.get('issue', 'N/A')}
-YOU MUST write a COMPLETELY DIFFERENT explanation that fixes the reviewer's concern. Do NOT repeat the same reasoning.
-"""
-            else:
-                questions_text += f"""
-PREVIOUS EXPLANATION (REJECTED): {prev_expl}
-REVIEWER FEEDBACK [{flag.get('category', 'unknown')}]: {flag.get('issue', 'N/A')}
-YOU MUST write a COMPLETELY DIFFERENT explanation that fixes the reviewer's concern.
-"""
-        questions_text += "---\n"
-
-    if is_regeneration:
-        intro = """You are a French grammar expert CORRECTING previously rejected explanations for an SLE Written Expression exam.
-
-The previous explanations were flagged by a quality reviewer. You MUST address the reviewer's specific feedback and produce accurate, corrected explanations.
-
-For each question below, provide a structured explanation with THREE separate parts:
-1. **why_incorrect**: Why the candidate's chosen answer is wrong (1-2 sentences)
-2. **why_correct**: Why the correct answer is right (1-2 sentences)
-3. **grammar_rule**: The specific French grammar rule with a brief example (1-2 sentences)
-
-IMPORTANT: Read the reviewer feedback carefully. If the reviewer says the reasoning is wrong, write completely new reasoning. If the reviewer says the grammar rule is incorrect, cite the correct rule. Do NOT repeat the same mistakes."""
-    else:
-        intro = """You are a French grammar expert providing feedback on an SLE Written Expression exam.
-
-For each incorrect answer below, provide a structured explanation with THREE separate parts:
-1. **why_incorrect**: Why the candidate's chosen answer is wrong (1-2 sentences)
-2. **why_correct**: Why the correct answer is right (1-2 sentences)
-3. **grammar_rule**: The specific French grammar rule with a brief example (1-2 sentences)"""
-
-    prompt = f"""{intro}
-
-Write in English with French examples where helpful. Be precise and educational.
-
-{questions_text}
-
-Return a JSON object mapping question IDs (as strings) to objects:
-{{
-  "1": {{
-    "why_incorrect": "...",
-    "why_correct": "...",
-    "grammar_rule": "..."
-  }}
-}}
-
-Return ONLY the JSON object."""
-
-    response = client.chat.completions.create(
-        model=model_config.model,
-        messages=[
-            {"role": "system", "content": "You are a French grammar expert providing exam feedback. Return only valid JSON."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.3,
-        max_tokens=4000,
-        response_format={"type": "json_object"}
-    )
-
-    raw = response.choices[0].message.content.strip()
-    explanations_raw = json.loads(raw)
-
-    return {int(k): v for k, v in explanations_raw.items()}
-
-
-def _append_to_tracking(session_id: str, incorrect_items: list, explanations: dict):
+def append_to_tracking(session_id: str, incorrect_items: list, explanations: dict):
     """Append incorrect answers to the persistent tracking file."""
     if not incorrect_items:
         return
@@ -163,7 +60,6 @@ def _append_to_tracking(session_id: str, incorrect_items: list, explanations: di
         lines.append(f"- **Correct answer:** {q['correct_answer']}) {opts[q['correct_answer']]}")
         lines.append(f"- **Error category:** {q['grammar_topic']}")
         if isinstance(expl, dict):
-            lines.append(f"- **Why incorrect:** {expl.get('why_incorrect', 'N/A')}")
             lines.append(f"- **Why correct:** {expl.get('why_correct', 'N/A')}")
             lines.append(f"- **Grammar rule:** {expl.get('grammar_rule', 'N/A')}")
         else:
@@ -182,27 +78,15 @@ def _append_to_tracking(session_id: str, incorrect_items: list, explanations: di
         f.write("\n".join(lines))
 
 
-def evaluate_exam(exam: dict, user_answers: dict, model_config: ModelConfig = None) -> dict:
-    """
-    Evaluate user answers against the exam answer key.
-
-    Args:
-        exam: The exam dict from generate_exam() with contexts→questions
-        user_answers: Dict mapping question_id (int) -> user's letter ("A"/"B"/"C"/"D")
-
-    Returns:
-        dict with: session_id, score, total, percentage, level, context_results
-    """
-    cfg = model_config or load_default_configs()["evaluate"]
-    if not cfg.api_key or cfg.api_key == "your_deepseek_key_here":
-        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY (or EVALUATE_API_KEY) in .env")
-
+def evaluate_exam(exam: dict, user_answers: dict) -> dict:
+    """Evaluate user answers deterministically using pre-generated explanations."""
     session_id = exam.get("session_id", f"exam_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
     correct_count = 0
     total_count = 0
     incorrect_items = []
     context_results = []
+    explanations = {}
 
     for ctx in exam.get("contexts", []):
         ctx_result = {
@@ -221,6 +105,7 @@ def evaluate_exam(exam: dict, user_answers: dict, model_config: ModelConfig = No
             if is_correct:
                 correct_count += 1
 
+            expl = q.get("explanation")
             q_result = {
                 "question_id": qid,
                 "grammar_topic": q["grammar_topic"],
@@ -228,9 +113,10 @@ def evaluate_exam(exam: dict, user_answers: dict, model_config: ModelConfig = No
                 "user_answer": user_ans,
                 "correct_answer": q["correct_answer"],
                 "is_correct": is_correct,
-                "explanation": None,
+                "explanation": expl,
             }
             ctx_result["question_results"].append(q_result)
+            explanations[qid] = expl
 
             if not is_correct:
                 incorrect_items.append({
@@ -240,15 +126,6 @@ def evaluate_exam(exam: dict, user_answers: dict, model_config: ModelConfig = No
                 })
 
         context_results.append(ctx_result)
-
-    # Generate explanations for incorrect answers
-    explanations = _generate_explanations(incorrect_items, cfg)
-
-    # Attach explanations to results
-    for ctx_r in context_results:
-        for q_r in ctx_r["question_results"]:
-            if not q_r["is_correct"]:
-                q_r["explanation"] = explanations.get(q_r["question_id"])
 
     percentage = (correct_count / total_count * 100) if total_count > 0 else 0
     level = _determine_level(percentage / 100)
@@ -263,7 +140,7 @@ def evaluate_exam(exam: dict, user_answers: dict, model_config: ModelConfig = No
     }
 
     _save_feedback_markdown(evaluation)
-    _append_to_tracking(session_id, incorrect_items, explanations)
+    append_to_tracking(session_id, incorrect_items, explanations)
 
     return evaluation
 
@@ -328,12 +205,10 @@ def _save_feedback_markdown(evaluation: dict):
 
             lines.append("")
 
-            # Explanation for incorrect answers
+            # Explanation for all questions
             expl = q_r.get("explanation")
-            if expl and not q_r["is_correct"]:
+            if expl:
                 if isinstance(expl, dict):
-                    lines.append(f"**Why incorrect:** {expl.get('why_incorrect', 'N/A')}")
-                    lines.append("")
                     lines.append(f"**Why correct:** {expl.get('why_correct', 'N/A')}")
                     lines.append("")
                     lines.append(f"**Grammar rule:** {expl.get('grammar_rule', 'N/A')}")
@@ -348,29 +223,3 @@ def _save_feedback_markdown(evaluation: dict):
         f.write("\n".join(lines))
 
     return filepath
-
-
-def regenerate_explanations(incorrect_items: list, model_config: ModelConfig = None) -> dict:
-    """
-    Re-generate grammar explanations for specific incorrect items.
-    Called by the feedback review loop when explanations are flagged as critical.
-
-    Args:
-        incorrect_items: list of dicts, each with keys:
-            question (dict with question_id, options, correct_answer, grammar_topic),
-            passage (str), user_answer (str),
-            previous_explanation (dict, optional): the rejected explanation,
-            flagged_issue (dict, optional): the reviewer's flag with issue/category
-
-    Returns:
-        dict mapping question_id (int) -> explanation dict
-    """
-    cfg = model_config or load_default_configs()["evaluate"]
-    if not cfg.api_key or cfg.api_key == "your_deepseek_key_here":
-        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY (or EVALUATE_API_KEY) in .env")
-    return _generate_explanations(incorrect_items, cfg)
-
-
-def resave_feedback_markdown(evaluation: dict):
-    """Re-save feedback markdown after explanations have been corrected."""
-    return _save_feedback_markdown(evaluation)

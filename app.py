@@ -13,9 +13,10 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from tools.generate_exam import generate_exam, regenerate_context, resave_exam_markdown
-from tools.evaluate_exam import evaluate_exam, regenerate_explanations, resave_feedback_markdown
-from tools.review_exam import review_exam_quality, review_feedback_quality, log_system_errors
+from tools.evaluate_exam import evaluate_exam
+from tools.review_exam import review_exam_quality, log_system_errors
 from tools.model_config import ModelConfig, load_default_configs
+from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, update_last_incorrect, assemble_exam_from_cache, get_bank_stats, prefill_bank, flag_context
 
 st.set_page_config(
     page_title="SLE Written Expression Simulator",
@@ -31,10 +32,10 @@ if "evaluation" not in st.session_state:
     st.session_state.evaluation = None
 if "exam_review" not in st.session_state:
     st.session_state.exam_review = None
-if "feedback_review" not in st.session_state:
-    st.session_state.feedback_review = None
 if "model_configs" not in st.session_state:
     st.session_state.model_configs = load_default_configs()
+
+init_db()
 
 
 def go_to(stage):
@@ -79,10 +80,10 @@ def render_setup():
 
     num_questions = st.number_input(
         "How many questions? / Combien de questions ?",
-        min_value=5,
-        max_value=40,
+        min_value=2,
+        max_value=20,
         value=10,
-        step=5,
+        step=1,
         help="The official exam has 40 questions. / L'examen officiel comporte 40 questions."
     )
 
@@ -94,6 +95,28 @@ def render_setup():
 - ~{num_fill} fill-in-the-blank questions / questions à compléter
 - ~{num_err} error identification questions / questions d'identification d'erreurs
 """)
+
+    # Question bank status
+    bank_stats = get_bank_stats()
+    st.markdown(f"**Question bank:** {bank_stats['total_questions']} questions available "
+                f"({bank_stats['battle_tested']} battle-tested, {bank_stats['reviewed']} reviewed, "
+                f"{bank_stats.get('warned', 0)} warned)")
+
+    col_prefill1, col_prefill2 = st.columns([3, 1])
+    with col_prefill1:
+        st.caption("Pre-filling generates questions via API (2-3 paid calls)")
+    with col_prefill2:
+        if st.button("Pre-fill bank", use_container_width=True):
+            try:
+                with st.spinner("Generating and caching questions..."):
+                    result = prefill_bank(num_questions, st.session_state.model_configs)
+                if result["success"]:
+                    st.success(result["message"])
+                    st.rerun()
+                else:
+                    st.warning(result["message"])
+            except Exception as e:
+                st.error(f"Pre-fill failed: {e}")
 
     with st.expander("AI model settings (optional)"):
         for tool_key, label in [("generate", "Generation"), ("evaluate", "Evaluation"), ("review", "Review")]:
@@ -115,69 +138,110 @@ def render_setup():
                 api_key=api_key or cfg.api_key,
             )
 
-    col1, col2 = st.columns(2)
+    # Check cache availability for button labels
+    bank_stats = get_bank_stats()
+    has_bank = bank_stats["total_questions"] > 0
+
+    col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("← Back / Retour", use_container_width=True):
             go_to("welcome")
             st.rerun()
     with col2:
-        if st.button("Generate exam / Générer l'examen", type="primary", use_container_width=True):
-            try:
-                with st.spinner("Generating your exam... / Génération de votre examen en cours..."):
-                    exam = generate_exam(num_questions, model_config=st.session_state.model_configs["generate"])
-
-                # ── Review Point 1: Exam quality ──
-                with st.spinner("Reviewing exam quality... / Vérification de la qualité..."):
-                    review = review_exam_quality(exam, model_config=st.session_state.model_configs["review"])
-
-                if not review["passed"]:
-                    # Collect critical issues grouped by context_id
-                    critical_issues_by_ctx = {}
-                    for f in review.get("flagged_questions", []):
-                        if f.get("severity") == "critical":
-                            cid = f.get("context_id")
-                            if cid is not None:
-                                critical_issues_by_ctx.setdefault(cid, []).append(f)
-
-                    if critical_issues_by_ctx:
-                        regen_failures = []
-                        with st.spinner("Fixing flagged questions... / Correction des questions signalées..."):
-                            for ctx_id, issues in critical_issues_by_ctx.items():
-                                for i, ctx in enumerate(exam["contexts"]):
-                                    if ctx["context_id"] == ctx_id:
-                                        start_qid = ctx["questions"][0]["question_id"]
-
-                                        try:
-                                            new_ctx = regenerate_context(ctx, exam["contexts"], start_qid, issues,
-                                                                         model_config=st.session_state.model_configs["generate"])
-                                            exam["contexts"][i] = new_ctx
-                                        except Exception as regen_err:
-                                            regen_failures.append(f"Context {ctx_id}: {regen_err}")
-                                        break
-
-                            # Re-save exam markdown with corrected contexts
-                            resave_exam_markdown(exam)
-
-                            # Re-review (but don't loop again)
-                            review = review_exam_quality(exam, model_config=st.session_state.model_configs["review"])
-
-                        if regen_failures:
-                            st.warning(
-                                "Some questions could not be regenerated and may contain errors: "
-                                + "; ".join(regen_failures),
-                                icon="⚠️"
-                            )
-
-                # Log any flagged issues to system error tracking
-                if review.get("flagged_questions"):
-                    log_system_errors(exam["session_id"], "exam_review", review)
-
-                st.session_state.exam_review = review
-                st.session_state.exam = exam
+        bank_disabled = not has_bank
+        if st.button("Instant exam (from bank)", use_container_width=True, disabled=bank_disabled):
+            cache_result = assemble_exam_from_cache(num_questions)
+            if cache_result["exam"] is not None:
+                st.session_state.exam = cache_result["exam"]
+                st.session_state.exam_review = {"passed": True, "flagged_questions": [], "summary": "Served from cache."}
                 go_to("exam")
                 st.rerun()
-            except Exception as e:
-                st.error(f"Error generating exam: {e}")
+            else:
+                st.warning("Not enough questions in bank. Use 'Generate fresh' instead.")
+    with col3:
+        if st.button("Generate fresh (API)", type="primary", use_container_width=True):
+            st.session_state.generate_fresh = True
+            st.session_state.requested_questions = num_questions
+
+    # Fresh generation path (existing pipeline)
+    if st.session_state.get("generate_fresh"):
+        st.session_state.generate_fresh = None
+        requested = st.session_state.get("requested_questions", num_questions)
+        try:
+            with st.spinner("Generating your exam... / Génération de votre examen en cours..."):
+                exam = generate_exam(requested, model_config=st.session_state.model_configs["generate"])
+
+            # ── Review Point 1: Exam quality ──
+            with st.spinner("Reviewing exam quality... / Vérification de la qualité..."):
+                review = review_exam_quality(exam, model_config=st.session_state.model_configs["review"])
+
+            if not review["passed"]:
+                # Collect critical issues grouped by context_id
+                critical_issues_by_ctx = {}
+                for f in review.get("flagged_questions", []):
+                    if f.get("severity") == "critical":
+                        cid = f.get("context_id")
+                        if cid is not None:
+                            critical_issues_by_ctx.setdefault(cid, []).append(f)
+
+                if critical_issues_by_ctx:
+                    regen_failures = []
+                    with st.spinner("Fixing flagged questions... / Correction des questions signalées..."):
+                        for ctx_id, issues in critical_issues_by_ctx.items():
+                            for i, ctx in enumerate(exam["contexts"]):
+                                if ctx["context_id"] == ctx_id:
+                                    start_qid = ctx["questions"][0]["question_id"]
+
+                                    try:
+                                        new_ctx = regenerate_context(ctx, exam["contexts"], start_qid, issues,
+                                                                     model_config=st.session_state.model_configs["generate"])
+                                        exam["contexts"][i] = new_ctx
+                                    except Exception as regen_err:
+                                        regen_failures.append(f"Context {ctx_id}: {regen_err}")
+                                    break
+
+                        # Re-save exam markdown with corrected contexts
+                        resave_exam_markdown(exam)
+
+                        # Re-review (but don't loop again)
+                        review = review_exam_quality(exam, model_config=st.session_state.model_configs["review"])
+
+                    if regen_failures:
+                        st.warning(
+                            "Some questions could not be regenerated and may contain errors: "
+                            + "; ".join(regen_failures),
+                            icon="⚠️"
+                        )
+
+            # Log any flagged issues to system error tracking
+            if review.get("flagged_questions"):
+                log_system_errors(exam["session_id"], "exam_review", review)
+
+            # Identify warned context IDs
+            warned_ctx_ids = set()
+            for f in review.get("flagged_questions", []):
+                if f.get("severity") == "warning" and f.get("context_id"):
+                    warned_ctx_ids.add(f["context_id"])
+
+            # Cache with appropriate status
+            warned_ctxs = [c for c in exam["contexts"] if c["context_id"] in warned_ctx_ids]
+            clean_ctxs = [c for c in exam["contexts"] if c["context_id"] not in warned_ctx_ids]
+
+            if clean_ctxs:
+                clean_exam = dict(exam)
+                clean_exam["contexts"] = clean_ctxs
+                cache_contexts(clean_exam, status="reviewed")
+            if warned_ctxs:
+                warned_exam = dict(exam)
+                warned_exam["contexts"] = warned_ctxs
+                cache_contexts(warned_exam, status="warned")
+
+            st.session_state.exam_review = review
+            st.session_state.exam = exam
+            go_to("exam")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error generating exam: {e}")
 
 
 # ── Exam ─────────────────────────────────────────────────────────────────────
@@ -210,6 +274,16 @@ def render_exam():
     )
 
     contexts = exam.get("contexts", [])
+
+    # Show banner for warned cached contexts
+    warned_contexts = [ctx for ctx in contexts if ctx.get("bank_status") == "warned"]
+    if warned_contexts:
+        st.info(
+            "Some questions in this exam were flagged with minor quality warnings during generation. "
+            "They may contain ambiguities. / "
+            "Certaines questions ont été signalées avec des avertissements mineurs.",
+            icon="ℹ️"
+        )
 
     with st.form("exam_form"):
         user_answers = {}
@@ -248,93 +322,21 @@ def render_exam():
     if hasattr(st.session_state, "user_answers") and st.session_state.get("user_answers"):
         answers = st.session_state.user_answers
         st.session_state.user_answers = None
+
         try:
-            with st.spinner("Evaluating your answers... / Évaluation de vos réponses en cours..."):
-                evaluation = evaluate_exam(exam, answers, model_config=st.session_state.model_configs["evaluate"])
+            evaluation = evaluate_exam(exam, answers)
 
-            # ── Review Point 2: Feedback quality ──
-            has_explanations = any(
-                q_r.get("explanation")
-                for ctx_r in evaluation["context_results"]
-                for q_r in ctx_r["question_results"]
-                if not q_r["is_correct"]
-            )
+            # Propagate bank fields into evaluation results
+            for ctx in exam.get("contexts", []):
+                for ctx_r in evaluation.get("context_results", []):
+                    if ctx_r["context_id"] == ctx["context_id"]:
+                        ctx_r["bank_context_id"] = ctx.get("bank_context_id")
+                        ctx_r["original_passage_hash"] = ctx.get("original_passage_hash")
+                        ctx_r["bank_status"] = ctx.get("bank_status")
 
-            if has_explanations:
-                with st.spinner("Verifying feedback quality... / Vérification des explications..."):
-                    feedback_review = review_feedback_quality(evaluation, model_config=st.session_state.model_configs["review"])
-
-                if not feedback_review["passed"]:
-                    # Collect critical flagged question IDs
-                    critical_qids = set(
-                        f["question_id"] for f in feedback_review.get("flagged_explanations", [])
-                        if f.get("severity") == "critical"
-                    )
-
-                    if critical_qids:
-                        # Build a lookup: question_id -> flagged issue dict
-                        flag_lookup = {}
-                        for f in feedback_review.get("flagged_explanations", []):
-                            if f.get("severity") == "critical":
-                                flag_lookup[f["question_id"]] = f
-
-                        regen_failures = []
-                        with st.spinner("Regenerating flagged explanations... / Régénération des explications..."):
-                            # Build incorrect_items with previous explanation + reviewer feedback
-                            items_to_regen = []
-                            for ctx in exam.get("contexts", []):
-                                for q in ctx.get("questions", []):
-                                    if q["question_id"] in critical_qids:
-                                        user_ans = answers.get(q["question_id"], "")
-                                        if user_ans != q["correct_answer"]:
-                                            # Find the current (bad) explanation
-                                            prev_expl = None
-                                            for ctx_r in evaluation["context_results"]:
-                                                for q_r in ctx_r["question_results"]:
-                                                    if q_r["question_id"] == q["question_id"]:
-                                                        prev_expl = q_r.get("explanation")
-                                                        break
-
-                                            items_to_regen.append({
-                                                "question": q,
-                                                "passage": ctx["passage"],
-                                                "user_answer": user_ans,
-                                                "previous_explanation": prev_expl,
-                                                "flagged_issue": flag_lookup.get(q["question_id"]),
-                                            })
-
-                            if items_to_regen:
-                                try:
-                                    new_expls = regenerate_explanations(items_to_regen, model_config=st.session_state.model_configs["evaluate"])
-
-                                    # Replace explanations in evaluation
-                                    for ctx_r in evaluation["context_results"]:
-                                        for q_r in ctx_r["question_results"]:
-                                            if q_r["question_id"] in new_expls:
-                                                q_r["explanation"] = new_expls[q_r["question_id"]]
-
-                                    # Re-save feedback markdown
-                                    resave_feedback_markdown(evaluation)
-
-                                    # Re-review once (don't loop)
-                                    feedback_review = review_feedback_quality(evaluation, model_config=st.session_state.model_configs["review"])
-                                except Exception as regen_err:
-                                    regen_failures.append(str(regen_err))
-
-                        if regen_failures:
-                            st.warning(
-                                "Some explanations could not be regenerated and may be inaccurate: "
-                                + "; ".join(regen_failures),
-                                icon="⚠️"
-                            )
-
-                # Log any flagged issues to system error tracking
-                if feedback_review.get("flagged_explanations"):
-                    log_system_errors(exam["session_id"], "feedback_review", feedback_review)
-
-                st.session_state.feedback_review = feedback_review
-            else:
-                st.session_state.feedback_review = None
+            # Post-evaluation triggers
+            upgrade_to_battle_tested(exam["session_id"], evaluation)
+            update_last_incorrect(evaluation)
 
             st.session_state.evaluation = evaluation
             go_to("results")
@@ -385,12 +387,17 @@ def render_results():
 *Notation proportionnelle simplifiée. Ceci est une estimation non officielle.*
 """)
 
-    # Build set of flagged explanation question IDs
-    feedback_review = st.session_state.get("feedback_review")
+    # Build set of flagged explanation question IDs from exam review
+    exam_review = st.session_state.get("exam_review")
     flagged_expl_ids = {}
-    if feedback_review:
-        for f in feedback_review.get("flagged_explanations", []):
-            flagged_expl_ids[f["question_id"]] = f
+    if exam_review:
+        for f in exam_review.get("flagged_questions", []):
+            if f.get("category") in ("incorrect_rule", "wrong_reasoning",
+                                      "misleading_explanation", "hallucinated_rule",
+                                      "inconsistent_with_question"):
+                qid = f.get("question_id")
+                if qid is not None:
+                    flagged_expl_ids[qid] = f
 
     # Per-context results
     st.markdown("## Detailed Results / Résultats détaillés")
@@ -405,6 +412,9 @@ def render_results():
             f"Context {ctx_r['context_id']} — {ctx_type} ({ctx_correct}/{ctx_total})",
             expanded=any(not q["is_correct"] for q in ctx_r["question_results"])
         ):
+            if ctx_r.get("bank_status") == "warned":
+                st.caption("This question was flagged during quality review (warning) / "
+                           "Cette question a été signalée lors du contrôle qualité (avertissement)")
             st.markdown(ctx_r["passage"])
             st.markdown("")
 
@@ -427,12 +437,11 @@ def render_results():
                     else:
                         st.markdown(f"{letter}) {opt_text}")
 
-                # Show explanation for incorrect answers
+                # Show explanation for all questions
                 expl = q_r.get("explanation")
-                if expl and not is_correct:
+                if expl:
                     st.markdown("---")
                     if isinstance(expl, dict):
-                        st.markdown(f"**Why incorrect:** {expl.get('why_incorrect', 'N/A')}")
                         st.markdown(f"**Why correct:** {expl.get('why_correct', 'N/A')}")
                         st.markdown(f"**Grammar rule:** {expl.get('grammar_rule', 'N/A')}")
                     else:
@@ -458,6 +467,25 @@ def render_results():
 
                 st.markdown("")
 
+            # Per-context flag UI
+            st.markdown("---")
+            flag_category = st.selectbox(
+                "Flag quality issue / Signaler un problème",
+                ["Wrong answer key", "Multiple correct answers", "Unclear passage",
+                 "Bad explanation", "Other"],
+                key=f"flag_cat_{ctx_r['context_id']}",
+            )
+            if st.button("Submit flag / Soumettre", key=f"flag_btn_{ctx_r['context_id']}"):
+                bank_ctx_id = ctx_r.get("bank_context_id")
+                p_hash = ctx_r.get("original_passage_hash")
+                if bank_ctx_id or p_hash:
+                    flag_context(bank_context_id=bank_ctx_id, passage_hash=p_hash, category=flag_category)
+                    st.success("Flag submitted. This context will be deprioritized in future exams. / "
+                               "Signalement soumis. Ce contexte sera déprioritisé.")
+                else:
+                    st.warning("Cannot flag this context (not yet in the question bank). / "
+                               "Impossible de signaler ce contexte (pas encore dans la banque).")
+
     st.divider()
 
     st.info(
@@ -470,7 +498,6 @@ def render_results():
         st.session_state.exam = None
         st.session_state.evaluation = None
         st.session_state.exam_review = None
-        st.session_state.feedback_review = None
         go_to("welcome")
         st.rerun()
 

@@ -12,6 +12,7 @@ This app generates realistic French SLE Written Expression exam questions via a 
 - `tools/generate_exam.py` — generates exam questions (AI API)
 - `tools/evaluate_exam.py` — grades answers and generates feedback (AI API)
 - `tools/review_exam.py` — validates exam quality and feedback accuracy (AI API)
+- `tools/question_bank.py` — SQLite question bank: cache validated contexts, assemble instant exams
 - `workflows/sle_exam_simulator.md` — full SOP for the exam workflow
 
 ## The WAT Architecture
@@ -31,9 +32,11 @@ tools/
   generate_exam.py        # AI API call to generate contexts→questions with A/B/C/D
   evaluate_exam.py        # Grade answers, generate explanations, save feedback, track errors
   review_exam.py          # Conservative QA review of exam questions and feedback explanations
+  question_bank.py        # SQLite question bank: cache, assemble, prefill
 tests/
   test_model_config.py    # Unit tests for model_config.py (6 tests)
   test_generate_exam.py   # ModelConfig wiring tests for generate_exam.py (3 tests)
+  test_question_bank.py   # Unit tests for question_bank.py (17 tests)
 workflows/
   sle_exam_simulator.md   # Full SOP for the exam workflow
 contexts/
@@ -41,6 +44,7 @@ contexts/
 .tmp/                     # Disposable: generated exam + feedback markdown files
 user_error_tracking.md    # Persistent: cumulative error log across all sessions
 system_error_tracking.md  # Persistent: review-flagged issues across sessions (system QA log)
+question_bank.db          # Persistent: SQLite question bank cache (gitignored, can be deleted and rebuilt)
 .env                      # API keys (never commit); DEEPSEEK_API_KEY + optional per-tool overrides
 .env.template             # Template for .env
 requirements.txt          # python-dotenv, requests, openai, streamlit
@@ -65,9 +69,10 @@ Exams use a **contexts → questions** structure:
 ## Key Technical Details
 
 - **AI Engine:** Any OpenAI-compatible endpoint via `openai` Python SDK. Default: DeepSeek (`base_url="https://api.deepseek.com"`, model `deepseek-chat`). Per-tool overrides via `GENERATE_*`, `EVALUATE_*`, `REVIEW_*` env vars or the in-app "AI model settings" expander. `tools/model_config.py` is the single source of truth.
-- **Exam generation:** Single API call, JSON response format, temperature 0.7. ~50% fill-in-blank, ~50% error identification. Prompt enforces broad grammar coverage: 11 real SLE topics, no topic repeated more than twice. Post-generation option shuffling randomizes A/B/C/D for fill-in-blank questions; error identification options are never shuffled (segment order must match passage labels).
-- **Evaluation:** Deterministic scoring + one API call for grammar explanations (temperature 0.3)
-- **Quality review:** Conservative QA agent (`tools/review_exam.py`) validates exam questions and feedback explanations at temperature 0.1. Includes deterministic duplicate-option detection. `_enforce_severity_rules()` caps `weak_distractor`, `topic_mismatch`, and `misleading_explanation` flags at "warning" regardless of AI output. Critical issues trigger targeted regeneration (max 1 retry per context/explanation). Failures are surfaced to the user, not silently swallowed. All flagged issues logged to `system_error_tracking.md`.
+- **Exam generation:** Single API call produces questions AND explanations (why_correct + grammar_rule), JSON response format, temperature 0.7, max_tokens 16000. ~50% fill-in-blank, ~50% error identification, 2-20 questions. Prompt enforces broad grammar coverage: 11 real SLE topics, no topic repeated more than twice. Explanations must not reference option letters (shuffled post-generation). Post-generation option shuffling randomizes A/B/C/D for fill-in-blank questions; error identification options are never shuffled.
+- **Evaluation:** Fully deterministic — no API call. Scores answers against the answer key and displays pre-generated explanations from exam data.
+- **Quality review:** Single unified review (`review_exam_quality()`) validates questions AND explanations at temperature 0.1. Deterministic pre-checks: duplicate options and structural mismatches (passage blanks vs question IDs, error-ID segments vs options). Only deterministic failures (`duplicate_options`, `structural_mismatch`) are critical; all 11 AI-judgment categories are capped at "warning". Contexts with warnings cache as `warned` (never upgrade to `battle_tested`). User flagging deprioritizes contexts in assembly. Critical issues trigger targeted regeneration (max 1 retry per context). All flagged issues logged to `system_error_tracking.md`.
+- **Pipeline:** 2 API calls per fresh exam (generate + review), 0 for cached exams. Previously was 4 calls.
 - **Output files:** Exam and feedback markdown saved to `.tmp/`; user errors appended to `user_error_tracking.md`; system QA issues appended to `system_error_tracking.md`
 
 ## Bottom Line

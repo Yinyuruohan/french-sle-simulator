@@ -1,20 +1,21 @@
 """
 SLE Written Expression Exam Reviewer
 
-Quality-control agent that validates AI-generated exam questions and feedback
-explanations using DeepSeek API with an adversarial prompt and low temperature.
+Quality-control agent that validates AI-generated exam questions (including
+grammar explanations) using DeepSeek API with an adversarial prompt and low
+temperature.
 
-Two review points:
-1. review_exam_quality()    — validates generated questions (post-generation)
-2. review_feedback_quality() — validates grammar explanations (post-evaluation)
+Single review point:
+- review_exam_quality() — validates generated questions and explanations
 
 Also provides:
-- Deterministic duplicate-option detection (pre-API check)
+- Deterministic duplicate-option and structural-mismatch detection (pre-API checks)
 - System error tracking: logs all flagged issues to system_error_tracking.md
 """
 
 import json
 import os
+import re
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
@@ -44,15 +45,25 @@ def _call_review_api(system_prompt: str, user_prompt: str, model_config: ModelCo
     )
 
     raw = response.choices[0].message.content.strip()
-    return json.loads(raw)
+    # Strip markdown fences and trailing commas from AI output
+    text = re.sub(r"^```(?:json)?\s*\n?", "", raw)
+    text = re.sub(r"\n?```\s*$", "", text)
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    return json.loads(text)
 
 
 # ── Severity enforcement ─────────────────────────────────────────────────────
 
 # Categories that can never be "critical" — cap them at "warning" regardless
 # of what the AI returns, as a safety net against prompt drift.
-EXAM_WARNING_ONLY_CATEGORIES = {"weak_distractor", "topic_mismatch"}
-FEEDBACK_WARNING_ONLY_CATEGORIES = {"misleading_explanation"}
+EXAM_WARNING_ONLY_CATEGORIES = {
+    "weak_distractor", "topic_mismatch",
+    "wrong_answer_key", "multiple_correct",
+    "no_real_error", "passage_grammar_error",
+    "incorrect_rule", "wrong_reasoning",
+    "misleading_explanation", "hallucinated_rule",
+    "inconsistent_with_question",
+}
 
 
 def _enforce_severity_rules(flagged_list: list, warning_only_categories: set) -> list:
@@ -91,6 +102,56 @@ def _check_duplicate_options(exam_data: dict) -> list:
     return flagged
 
 
+def _check_structural_mismatch(exam_data: dict) -> list:
+    """
+    Deterministic check: verify passage structure matches question structure.
+    - Fill-in-blank: (N) ___ markers must match question_id values
+    - Error identification: (A), (B), (C) segment labels must match options A/B/C
+    """
+    flagged = []
+    blank_pattern = re.compile(r"\((\d+)\)\s*_+")
+    segment_pattern = re.compile(r"\(([A-C])\)")
+
+    for ctx in exam_data.get("contexts", []):
+        questions = ctx.get("questions", [])
+        if not questions:
+            continue
+
+        if ctx["type"] == "fill_in_blank":
+            passage_blanks = set(int(m) for m in blank_pattern.findall(ctx["passage"]))
+            question_ids = set(q["question_id"] for q in questions)
+            if passage_blanks != question_ids:
+                missing_blanks = question_ids - passage_blanks
+                extra_blanks = passage_blanks - question_ids
+                issue_parts = []
+                if missing_blanks:
+                    issue_parts.append(f"missing blanks for question_ids {missing_blanks}")
+                if extra_blanks:
+                    issue_parts.append(f"extra blanks {extra_blanks} with no matching questions")
+                flagged.append({
+                    "question_id": questions[0]["question_id"],
+                    "context_id": ctx["context_id"],
+                    "severity": "critical",
+                    "issue": f"Structural mismatch: {'; '.join(issue_parts)}",
+                    "category": "structural_mismatch",
+                })
+
+        elif ctx["type"] == "error_identification":
+            passage_segments = set(segment_pattern.findall(ctx["passage"]))
+            # Options A, B, C should correspond to passage segments; skip D
+            option_keys = set(k for k in questions[0].get("options", {}).keys() if k != "D")
+            if passage_segments != option_keys:
+                flagged.append({
+                    "question_id": questions[0]["question_id"],
+                    "context_id": ctx["context_id"],
+                    "severity": "critical",
+                    "issue": f"Structural mismatch: passage segments {passage_segments} don't match option keys {option_keys}",
+                    "category": "structural_mismatch",
+                })
+
+    return flagged
+
+
 # ── System error tracking ────────────────────────────────────────────────────
 
 def log_system_errors(session_id: str, review_type: str, review_result: dict):
@@ -99,17 +160,16 @@ def log_system_errors(session_id: str, review_type: str, review_result: dict):
 
     Args:
         session_id: The exam session ID
-        review_type: "exam_review" or "feedback_review"
-        review_result: The review dict with flagged_questions or flagged_explanations
+        review_type: "exam_review"
+        review_result: The review dict with flagged_questions
     """
-    flagged_key = "flagged_questions" if review_type == "exam_review" else "flagged_explanations"
-    flagged = review_result.get(flagged_key, [])
+    flagged = review_result.get("flagged_questions", [])
 
     if not flagged:
         return
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    review_label = "Exam Quality Review" if review_type == "exam_review" else "Feedback Quality Review"
+    review_label = "Exam Quality Review"
 
     lines = [
         f"\n## {review_label} — Session: {session_id}",
@@ -163,11 +223,19 @@ ERROR IDENTIFICATION questions:
 3. SEGMENT-PASSAGE MATCH: Do the bolded segments in the passage correspond to the option text?
 4. STRUCTURAL: Does question numbering in the passage match question_id?
 
+EXPLANATION REVIEW (for each question with explanations):
+1. RULE ACCURACY: Is the cited grammar rule real and correctly stated?
+2. REASONING CORRECTNESS: Does "why_correct" accurately explain the correct answer?
+3. CONSISTENCY: Does the explanation match the actual question content?
+4. NO HALLUCINATION: Are there fabricated rules or exceptions?
+
+Explanation issues should use categories: "incorrect_rule", "wrong_reasoning", "misleading_explanation", "hallucinated_rule", "inconsistent_with_question"
+
 SEVERITY RULES:
 - "critical": The correct answer is objectively wrong, two options are equally correct (not just the distractor being plausible), the passage has a grammar error that directly makes the question unanswerable, an error_identification question has no real error in the "correct" segment, or two options have identical/duplicate text.
 - "warning": A distractor is plausible but the correct answer is clearly better, the grammar topic label is imprecise, or a passage has a minor stylistic issue that does not affect the question.
 
-IMPORTANT: The categories "weak_distractor" and "topic_mismatch" must ALWAYS be severity "warning", never "critical".
+IMPORTANT: The categories "weak_distractor", "topic_mismatch", "wrong_answer_key", "multiple_correct", "no_real_error", "passage_grammar_error", "incorrect_rule", "wrong_reasoning", "misleading_explanation", "hallucinated_rule", and "inconsistent_with_question" must ALWAYS be severity "warning", never "critical".
 
 Return ONLY a JSON object. Be conservative: only flag what is clearly broken."""
 
@@ -192,13 +260,15 @@ def review_exam_quality(exam_data: dict, model_config: ModelConfig = None) -> di
 
     # Deterministic pre-checks
     duplicate_flags = _check_duplicate_options(exam_data)
+    structural_flags = _check_structural_mismatch(exam_data)
+    deterministic_flags = duplicate_flags + structural_flags
 
     try:
         user_prompt = _build_exam_review_prompt(exam_data)
         result = _call_review_api(EXAM_REVIEW_SYSTEM, user_prompt, cfg)
 
         # Merge deterministic flags with API flags, then enforce severity rules
-        flagged = duplicate_flags + result.get("flagged_questions", [])
+        flagged = deterministic_flags + result.get("flagged_questions", [])
         flagged = _enforce_severity_rules(flagged, EXAM_WARNING_ONLY_CATEGORIES)
         has_critical = any(f.get("severity") == "critical" for f in flagged)
 
@@ -213,11 +283,11 @@ def review_exam_quality(exam_data: dict, model_config: ModelConfig = None) -> di
         }
     except Exception:
         # API failed but deterministic checks still apply
-        has_critical = any(f.get("severity") == "critical" for f in duplicate_flags)
+        has_critical = any(f.get("severity") == "critical" for f in deterministic_flags)
         return {
             "passed": not has_critical,
-            "flagged_questions": duplicate_flags,
-            "summary": "API review skipped due to an error." + (f" Found {len(duplicate_flags)} duplicate option(s)." if duplicate_flags else ""),
+            "flagged_questions": deterministic_flags,
+            "summary": "API review skipped due to an error." + (f" Found {len(deterministic_flags)} deterministic issue(s)." if deterministic_flags else ""),
         }
 
 
@@ -237,6 +307,11 @@ def _build_exam_review_prompt(exam_data: dict) -> str:
             lines.append(f"Question ({q['question_id']}) [grammar_topic: {q['grammar_topic']}]")
             lines.append(f"Options: {opts_str}")
             lines.append(f"Marked correct_answer: {q['correct_answer']}")
+            expl = q.get("explanation")
+            if expl and isinstance(expl, dict):
+                lines.append("Explanation:")
+                lines.append(f"  why_correct: {expl.get('why_correct', 'N/A')}")
+                lines.append(f"  grammar_rule: {expl.get('grammar_rule', 'N/A')}")
             lines.append("")
 
     lines.append("""Return JSON:
@@ -248,7 +323,7 @@ def _build_exam_review_prompt(exam_data: dict) -> str:
       "context_id": 1,
       "severity": "critical" | "warning",
       "issue": "Detailed description of the problem",
-      "category": "wrong_answer_key" | "multiple_correct" | "passage_grammar_error" | "weak_distractor" | "no_real_error" | "structural_mismatch" | "topic_mismatch" | "duplicate_options"
+      "category": "wrong_answer_key" | "multiple_correct" | "passage_grammar_error" | "weak_distractor" | "no_real_error" | "structural_mismatch" | "topic_mismatch" | "duplicate_options" | "incorrect_rule" | "wrong_reasoning" | "misleading_explanation" | "hallucinated_rule" | "inconsistent_with_question"
     }
   ],
   "summary": "Overall assessment in one sentence"
@@ -258,118 +333,3 @@ def _build_exam_review_prompt(exam_data: dict) -> str:
 
     return "\n".join(lines)
 
-
-# ── Review Point 2: Feedback Quality ─────────────────────────────────────────
-
-FEEDBACK_REVIEW_SYSTEM = """You are a French grammar expert and educator reviewing AI-generated grammar explanations for incorrect exam answers on the Canadian PSC SLE Written Expression test.
-
-Your role is to catch factually wrong grammar explanations that would teach students incorrect French. Be conservative: only flag explanations that contain a genuine factual error. Imprecise or incomplete explanations are acceptable — flag them as "warning" only if needed.
-
-For each explanation, verify:
-1. RULE ACCURACY: Is the cited grammar rule real and correctly stated? Flag as critical only if the rule is factually wrong or directly contradicts standard French grammar (Bescherelle, Grevisse). Do not flag for imprecision or simplification.
-2. REASONING CORRECTNESS: Does "why_incorrect" explain why the student's answer is wrong? Does "why_correct" explain the correct answer? Flag as critical only if the reasoning is clearly backwards or contradicts the answer key.
-3. CONSISTENCY: Does the explanation match the actual question content (passage, options, answers)? Flag as critical only if there is a clear mismatch that would confuse the student.
-4. NO HALLUCINATION: Are there fabricated rules or exceptions that don't exist in standard French? Flag as critical only for clear hallucinations, not for uncommon but valid rules.
-
-SEVERITY RULES:
-- "critical": The grammar rule is factually wrong, the reasoning directly contradicts the correct answer, or the explanation would actively teach the student incorrect French.
-- "warning": The explanation is imprecise, oversimplified, or could be clearer — but is not factually wrong.
-
-IMPORTANT: The category "misleading_explanation" must ALWAYS be severity "warning", never "critical". Reserve "critical" for "incorrect_rule", "wrong_reasoning", "hallucinated_rule", and "inconsistent_with_question" only when the error is clear and unambiguous.
-
-Return ONLY a JSON object. Be conservative: only flag what is clearly factually wrong."""
-
-
-def review_feedback_quality(evaluation_data: dict, model_config: ModelConfig = None) -> dict:
-    """
-    Validate grammar explanations after evaluation.
-
-    Args:
-        evaluation_data: The evaluation dict from evaluate_exam() with context_results
-
-    Returns:
-        dict with keys:
-            passed: bool (True if no critical issues)
-            flagged_explanations: list of dicts with question_id, severity, issue, category
-            summary: str
-    """
-    cfg = model_config or load_default_configs()["review"]
-
-    try:
-        user_prompt = _build_feedback_review_prompt(evaluation_data)
-        if not user_prompt:
-            return {"passed": True, "flagged_explanations": [], "summary": "No explanations to review."}
-
-        result = _call_review_api(FEEDBACK_REVIEW_SYSTEM, user_prompt, cfg)
-
-        flagged = result.get("flagged_explanations", [])
-        flagged = _enforce_severity_rules(flagged, FEEDBACK_WARNING_ONLY_CATEGORIES)
-        has_critical = any(f.get("severity") == "critical" for f in flagged)
-
-        return {
-            "passed": not has_critical,
-            "flagged_explanations": flagged,
-            "summary": result.get("summary", "Review complete."),
-        }
-    except Exception:
-        return {
-            "passed": True,
-            "flagged_explanations": [],
-            "summary": "Feedback review skipped due to an error.",
-        }
-
-
-def _build_feedback_review_prompt(evaluation_data: dict) -> str:
-    """Serialize incorrect answers with explanations for the review prompt."""
-    items = []
-
-    for ctx_r in evaluation_data.get("context_results", []):
-        for q_r in ctx_r["question_results"]:
-            if q_r["is_correct"] or not q_r.get("explanation"):
-                continue
-
-            expl = q_r["explanation"]
-            opts = q_r["options"]
-            opts_str = " | ".join(f"{k}) {v}" for k, v in opts.items())
-
-            entry = f"""Question ({q_r['question_id']}) [grammar_topic: {q_r['grammar_topic']}]
-Passage: {ctx_r['passage']}
-Options: {opts_str}
-Candidate chose: {q_r['user_answer']}) {opts[q_r['user_answer']]}
-Correct answer: {q_r['correct_answer']}) {opts[q_r['correct_answer']]}"""
-
-            if isinstance(expl, dict):
-                entry += f"""
-why_incorrect: {expl.get('why_incorrect', 'N/A')}
-why_correct: {expl.get('why_correct', 'N/A')}
-grammar_rule: {expl.get('grammar_rule', 'N/A')}"""
-            else:
-                entry += f"\nexplanation: {expl}"
-
-            items.append(entry)
-
-    if not items:
-        return ""
-
-    lines = [
-        "Review the following grammar explanations for incorrect exam answers.\n",
-        "\n---\n".join(items),
-        "",
-        """Return JSON:
-{
-  "passed": true/false,
-  "flagged_explanations": [
-    {
-      "question_id": 1,
-      "severity": "critical" | "warning",
-      "issue": "Detailed description of the problem",
-      "category": "incorrect_rule" | "wrong_reasoning" | "misleading_explanation" | "hallucinated_rule" | "inconsistent_with_question"
-    }
-  ],
-  "summary": "Overall assessment in one sentence"
-}
-
-"passed" is true ONLY if there are zero critical issues.""",
-    ]
-
-    return "\n".join(lines)
