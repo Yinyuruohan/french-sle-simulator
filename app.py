@@ -45,27 +45,457 @@ def go_to(stage):
 # ── Welcome ──────────────────────────────────────────────────────────────────
 
 def render_welcome():
-    st.title("SLE Written Expression Simulator")
-    st.markdown("### Simulateur d'expression écrite — Évaluation de langue seconde")
-    st.divider()
+    st.html("""
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
-    st.markdown("""
-**English:** This tool simulates the Canadian federal Public Service Commission's
-Second Language Evaluation (SLE) — Test of Written Expression. It generates
-practice questions modeled on the official exam format.
+      * { box-sizing: border-box; margin: 0; padding: 0; }
 
-**Français :** Cet outil simule le Test d'expression écrite de l'Évaluation de
-langue seconde (ELS) de la Commission de la fonction publique du Canada.
-Il génère des questions de pratique selon le format de l'examen officiel.
-""")
+      .lp-wrap {
+        font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+        background: #f0f6ff;
+        border-radius: 16px;
+        overflow: hidden;
+      }
 
-    st.warning(
-        "**Disclaimer / Avertissement:** This is an unofficial practice tool. Results are not official. / "
-        "Cet outil de pratique n'est pas officiel. Les résultats ne sont pas officiels.",
-        icon="⚠️"
-    )
+      /* ── HERO ── */
+      .lp-hero {
+        background: linear-gradient(135deg, #e8f1ff 0%, #f0f6ff 50%, #e0edff 100%);
+        padding: 48px 40px 40px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 32px;
+        align-items: center;
+        position: relative;
+        overflow: hidden;
+      }
 
-    st.divider()
+      /* Decorative circles background */
+      .lp-hero::before {
+        content: '';
+        position: absolute;
+        width: 400px; height: 400px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%);
+        top: -100px; right: -80px;
+        pointer-events: none;
+      }
+
+      .lp-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(59,130,246,0.1);
+        color: #2563eb;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        padding: 5px 12px;
+        border-radius: 100px;
+        margin-bottom: 20px;
+        border: 1px solid rgba(59,130,246,0.2);
+      }
+
+      .lp-badge::before {
+        content: '🇨🇦';
+        font-size: 13px;
+      }
+
+      .lp-hero h1 {
+        font-size: clamp(28px, 4vw, 44px);
+        font-weight: 800;
+        line-height: 1.12;
+        color: #0f172a;
+        margin-bottom: 8px;
+        letter-spacing: -0.03em;
+      }
+
+      .lp-hero h1 .accent {
+        color: #2563eb;
+      }
+
+      .lp-hero-sub {
+        font-size: 15px;
+        color: #475569;
+        font-weight: 400;
+        line-height: 1.6;
+        margin-bottom: 28px;
+        font-style: italic;
+      }
+
+      .lp-hero-desc {
+        font-size: 15px;
+        color: #334155;
+        line-height: 1.65;
+        margin-bottom: 28px;
+        font-weight: 400;
+      }
+
+      .lp-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .lp-pill {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: white;
+        border: 1px solid #e2e8f0;
+        color: #475569;
+        font-size: 12.5px;
+        font-weight: 500;
+        padding: 5px 12px;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        white-space: nowrap;
+      }
+
+      .lp-pill .dot {
+        width: 6px; height: 6px;
+        background: #2563eb;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      /* ── MOCK UI CARD (right side) ── */
+      .lp-mock {
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 20px 60px rgba(37,99,235,0.12), 0 4px 12px rgba(0,0,0,0.06);
+        overflow: hidden;
+        border: 1px solid rgba(37,99,235,0.08);
+      }
+
+      .lp-mock-header {
+        background: #2563eb;
+        padding: 14px 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .lp-mock-dots {
+        display: flex; gap: 5px;
+      }
+
+      .lp-mock-dots span {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.4);
+      }
+
+      .lp-mock-dots span:first-child { background: rgba(255,255,255,0.7); }
+
+      .lp-mock-title {
+        color: white;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+      }
+
+      .lp-mock-body {
+        padding: 18px;
+      }
+
+      .lp-mock-q {
+        font-size: 12px;
+        font-weight: 600;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 10px;
+      }
+
+      .lp-mock-passage {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 12px 14px;
+        font-size: 13px;
+        color: #1e293b;
+        line-height: 1.6;
+        margin-bottom: 12px;
+        font-style: italic;
+      }
+
+      .lp-mock-passage .blank {
+        display: inline-block;
+        background: #dbeafe;
+        color: #1d4ed8;
+        font-weight: 700;
+        font-style: normal;
+        padding: 1px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+
+      .lp-mock-options {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+
+      .lp-mock-opt {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1.5px solid #e2e8f0;
+        font-size: 13px;
+        color: #475569;
+        background: white;
+        font-weight: 500;
+      }
+
+      .lp-mock-opt.selected {
+        border-color: #2563eb;
+        background: #eff6ff;
+        color: #1d4ed8;
+      }
+
+      .lp-mock-opt .opt-letter {
+        width: 22px; height: 22px;
+        border-radius: 50%;
+        background: #f1f5f9;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 11px;
+        font-weight: 700;
+        color: #64748b;
+        flex-shrink: 0;
+      }
+
+      .lp-mock-opt.selected .opt-letter {
+        background: #2563eb;
+        color: white;
+      }
+
+      .lp-mock-level {
+        display: flex;
+        gap: 6px;
+        margin-top: 10px;
+      }
+
+      .lp-level-badge {
+        flex: 1;
+        text-align: center;
+        padding: 7px 4px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        border: 1.5px solid #e2e8f0;
+        color: #94a3b8;
+      }
+
+      .lp-level-badge.active {
+        background: #eff6ff;
+        border-color: #2563eb;
+        color: #1d4ed8;
+      }
+
+      /* ── FEATURES ── */
+      .lp-features {
+        padding: 36px 40px 40px;
+        background: white;
+      }
+
+      .lp-feat-label {
+        display: inline-block;
+        background: #f0f6ff;
+        color: #2563eb;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        padding: 5px 14px;
+        border-radius: 100px;
+        margin-bottom: 18px;
+        border: 1px solid rgba(37,99,235,0.15);
+      }
+
+      .lp-feat-heading {
+        font-size: clamp(20px, 2.5vw, 26px);
+        font-weight: 800;
+        color: #0f172a;
+        margin-bottom: 24px;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+      }
+
+      .lp-feat-heading .accent { color: #2563eb; }
+
+      .lp-feat-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+
+      .lp-feat-card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 22px 20px;
+        transition: box-shadow 0.2s, border-color 0.2s;
+      }
+
+      .lp-feat-card:hover {
+        box-shadow: 0 8px 24px rgba(37,99,235,0.1);
+        border-color: rgba(37,99,235,0.2);
+      }
+
+      .lp-feat-icon {
+        width: 40px; height: 40px;
+        border-radius: 10px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 20px;
+        margin-bottom: 14px;
+      }
+
+      .lp-feat-card h3 {
+        font-size: 14px;
+        font-weight: 700;
+        color: #0f172a;
+        margin-bottom: 7px;
+        line-height: 1.3;
+      }
+
+      .lp-feat-card p {
+        font-size: 13px;
+        color: #64748b;
+        line-height: 1.6;
+        font-weight: 400;
+      }
+
+      /* ── DISCLAIMER ── */
+      .lp-disclaimer {
+        padding: 14px 40px;
+        background: #f8fafc;
+        border-top: 1px solid #e2e8f0;
+        font-size: 12px;
+        color: #94a3b8;
+        text-align: center;
+        font-style: italic;
+        line-height: 1.5;
+      }
+
+      /* Override Streamlit primary button to match landing page blue */
+      div.stButton > button[kind="primary"],
+      div.stButton > button[data-testid="baseButton-primary"] {
+        background: #2563eb !important;
+        border-color: #2563eb !important;
+        color: white !important;
+        font-family: 'Plus Jakarta Sans', -apple-system, sans-serif !important;
+        font-weight: 600 !important;
+        font-size: 15px !important;
+        border-radius: 10px !important;
+        padding: 10px 24px !important;
+        transition: background 0.2s, box-shadow 0.2s !important;
+      }
+
+      div.stButton > button[kind="primary"]:hover,
+      div.stButton > button[data-testid="baseButton-primary"]:hover {
+        background: #1d4ed8 !important;
+        border-color: #1d4ed8 !important;
+        box-shadow: 0 4px 14px rgba(37,99,235,0.35) !important;
+      }
+
+      /* Animations */
+      @keyframes lp-up {
+        from { opacity: 0; transform: translateY(18px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+
+      .lp-hero-left  { animation: lp-up 0.55s cubic-bezier(.22,1,.36,1) both; animation-delay: 0.05s; }
+      .lp-mock       { animation: lp-up 0.55s cubic-bezier(.22,1,.36,1) both; animation-delay: 0.18s; }
+      .lp-features   { animation: lp-up 0.55s cubic-bezier(.22,1,.36,1) both; animation-delay: 0.28s; }
+    </style>
+
+    <div class="lp-wrap">
+
+      <!-- HERO -->
+      <div class="lp-hero">
+        <div class="lp-hero-left">
+          <div class="lp-badge">Public Service Commission of Canada</div>
+          <h1>Practice French writing<br><span class="accent">smarter</span>, not harder</h1>
+          <p class="lp-hero-sub">Simulateur d'expression écrite — ÉLS / SLE</p>
+          <p class="lp-hero-desc">
+            AI-generated practice exams modeled on the official SLE Written Expression format.
+            Get instant grammar feedback and track your progress toward levels A, B, and C.
+          </p>
+          <div class="lp-pills">
+            <span class="lp-pill"><span class="dot"></span>Fill-in-the-blank</span>
+            <span class="lp-pill"><span class="dot"></span>Error identification</span>
+            <span class="lp-pill"><span class="dot"></span>2–20 questions</span>
+            <span class="lp-pill"><span class="dot"></span>Instant feedback</span>
+            <span class="lp-pill"><span class="dot"></span>Question bank</span>
+          </div>
+        </div>
+
+        <!-- Mock UI -->
+        <div class="lp-mock">
+          <div class="lp-mock-header">
+            <div class="lp-mock-dots">
+              <span></span><span></span><span></span>
+            </div>
+            <span class="lp-mock-title">SLE — Question (3)</span>
+            <span style="font-size:11px;color:rgba(255,255,255,0.6);font-weight:500;">3 / 10</span>
+          </div>
+          <div class="lp-mock-body">
+            <p class="lp-mock-q">Fill in the blank</p>
+            <div class="lp-mock-passage">
+              Le directeur a demandé que tous les employés <span class="blank">(3) ___</span> le rapport avant vendredi.
+            </div>
+            <div class="lp-mock-options">
+              <div class="lp-mock-opt"><span class="opt-letter">A</span> soumettent</div>
+              <div class="lp-mock-opt selected"><span class="opt-letter">B</span> soumettront</div>
+              <div class="lp-mock-opt"><span class="opt-letter">C</span> ont soumis</div>
+              <div class="lp-mock-opt"><span class="opt-letter">D</span> soumettait</div>
+            </div>
+            <div class="lp-mock-level">
+              <div class="lp-level-badge">A ≥50%</div>
+              <div class="lp-level-badge active">B ≥70%</div>
+              <div class="lp-level-badge">C ≥90%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FEATURES -->
+      <div class="lp-features">
+        <div class="lp-feat-label">Core Features</div>
+        <p class="lp-feat-heading">Here are the <span class="accent">reasons</span> you should try</p>
+        <div class="lp-feat-grid">
+          <div class="lp-feat-card">
+            <div class="lp-feat-icon" style="background:#eff6ff;">🎯</div>
+            <h3>Realistic exam format</h3>
+            <p>Two question types matching the official SLE exam: fill-in-the-blank and error identification with Canadian federal workplace passages.</p>
+          </div>
+          <div class="lp-feat-card">
+            <div class="lp-feat-icon" style="background:#f0fdf4;">✅</div>
+            <h3>Grammar practice &amp; checking</h3>
+            <p>Every question includes a <em>why_correct</em> explanation and grammar rule. AI quality review validates all answers before you see them.</p>
+          </div>
+          <div class="lp-feat-card">
+            <div class="lp-feat-icon" style="background:#fefce8;">⚡</div>
+            <h3>Instant exams, anytime</h3>
+            <p>Question bank cache delivers exams instantly with no API call. Pre-fill the bank once and practice offline at any time.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- DISCLAIMER -->
+      <div class="lp-disclaimer">
+        ⚠ Unofficial practice tool — not affiliated with the Public Service Commission of Canada. Results are not official. ·
+        Outil non officiel — sans lien avec la Commission de la fonction publique du Canada.
+      </div>
+
+    </div>
+    """)
+
+    st.markdown("")
 
     if st.button("Start a writing exam / Commencer un examen d'écriture", type="primary", use_container_width=True):
         go_to("setup")
