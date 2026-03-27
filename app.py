@@ -21,7 +21,7 @@ from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_teste
 st.set_page_config(
     page_title="SLE Written Expression Simulator",
     page_icon="📝",
-    layout="centered",
+    layout="wide",
 )
 
 if "stage" not in st.session_state:
@@ -42,9 +42,295 @@ def go_to(stage):
     st.session_state.stage = stage
 
 
+def _inject_design_system():
+    """Inject global design system CSS matching the landing page aesthetic."""
+    st.html("""
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+      /* ── Layout: centered at 730px ── */
+      section[data-testid="stMain"] .stMainBlockContainer {
+        max-width: 730px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+      }
+
+      /* ── Global font & background ── */
+      html, body, section[data-testid="stMain"] {
+        font-family: 'Plus Jakarta Sans', -apple-system, sans-serif !important;
+      }
+      section[data-testid="stMain"] {
+        background: #f0f6ff !important;
+      }
+      .stMainBlockContainer {
+        background: #f0f6ff !important;
+      }
+
+      /* ── Headings ── */
+      h1 {
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 28px !important;
+        font-weight: 800 !important;
+        color: #0f172a !important;
+        letter-spacing: -0.02em !important;
+        margin-bottom: 4px !important;
+      }
+      h2 {
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 20px !important;
+        font-weight: 700 !important;
+        color: #0f172a !important;
+        letter-spacing: -0.01em !important;
+      }
+      h3 {
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 15px !important;
+        font-weight: 700 !important;
+        color: #1e293b !important;
+      }
+      h4 {
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 14px !important;
+        font-weight: 600 !important;
+        color: #334155 !important;
+      }
+      p, li, label, .stMarkdown {
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        color: #334155 !important;
+        font-size: 14px !important;
+        line-height: 1.65 !important;
+      }
+
+      /* ── Divider ── */
+      hr {
+        border-color: #e2e8f0 !important;
+        margin: 16px 0 !important;
+      }
+
+      /* ── Primary button ── */
+      div.stButton > button[kind="primary"],
+      div.stButton > button[data-testid="baseButton-primary"],
+      div.stFormSubmitButton > button[kind="primaryFormSubmit"],
+      div.stFormSubmitButton > button[data-testid="baseButton-primaryFormSubmit"] {
+        background: #2563eb !important;
+        border-color: #2563eb !important;
+        color: white !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-weight: 600 !important;
+        font-size: 14px !important;
+        border-radius: 10px !important;
+        padding: 10px 20px !important;
+        transition: background 0.2s, box-shadow 0.2s !important;
+        box-shadow: 0 2px 8px rgba(37,99,235,0.2) !important;
+      }
+      div.stButton > button[kind="primary"]:hover,
+      div.stButton > button[data-testid="baseButton-primary"]:hover,
+      div.stFormSubmitButton > button:hover {
+        background: #1d4ed8 !important;
+        border-color: #1d4ed8 !important;
+        box-shadow: 0 4px 14px rgba(37,99,235,0.35) !important;
+      }
+
+      /* ── Secondary button ── */
+      div.stButton > button[kind="secondary"],
+      div.stButton > button[data-testid="baseButton-secondary"] {
+        background: white !important;
+        border: 1.5px solid #e2e8f0 !important;
+        color: #334155 !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-weight: 600 !important;
+        font-size: 14px !important;
+        border-radius: 10px !important;
+        padding: 10px 20px !important;
+        transition: border-color 0.2s, box-shadow 0.2s !important;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05) !important;
+      }
+      div.stButton > button[kind="secondary"]:hover,
+      div.stButton > button[data-testid="baseButton-secondary"]:hover {
+        border-color: #2563eb !important;
+        color: #2563eb !important;
+        box-shadow: 0 2px 8px rgba(37,99,235,0.12) !important;
+      }
+
+      /* ── Expanders (context blocks) ── */
+      div[data-testid="stExpander"] {
+        background: white !important;
+        border: 1.5px solid #e2e8f0 !important;
+        border-radius: 12px !important;
+        box-shadow: 0 2px 8px rgba(37,99,235,0.06) !important;
+        margin-bottom: 12px !important;
+        overflow: hidden !important;
+      }
+      div[data-testid="stExpander"] summary {
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-weight: 600 !important;
+        font-size: 14px !important;
+        color: #0f172a !important;
+        padding: 14px 16px !important;
+      }
+      div[data-testid="stExpander"] summary:hover {
+        color: #2563eb !important;
+      }
+
+      /* ── Form container ── */
+      div[data-testid="stForm"] {
+        background: white !important;
+        border: 1.5px solid #e2e8f0 !important;
+        border-radius: 12px !important;
+        padding: 20px !important;
+        box-shadow: 0 2px 8px rgba(37,99,235,0.05) !important;
+      }
+
+      /* ── Radio buttons ── */
+      div[data-testid="stRadio"] > div {
+        gap: 8px !important;
+      }
+      div[data-testid="stRadio"] label {
+        background: #f8fafc !important;
+        border: 1.5px solid #e2e8f0 !important;
+        border-radius: 8px !important;
+        padding: 10px 14px !important;
+        cursor: pointer !important;
+        transition: border-color 0.15s, background 0.15s !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        font-weight: 500 !important;
+        color: #334155 !important;
+        width: 100% !important;
+      }
+      div[data-testid="stRadio"] label:hover {
+        border-color: #93c5fd !important;
+        background: #eff6ff !important;
+      }
+      div[data-testid="stRadio"] label[data-checked="true"],
+      div[data-testid="stRadio"] label:has(input:checked) {
+        border-color: #2563eb !important;
+        background: #eff6ff !important;
+        color: #1d4ed8 !important;
+      }
+      /* Hide default radio circle, show styled one */
+      div[data-testid="stRadio"] input[type="radio"] {
+        accent-color: #2563eb !important;
+      }
+
+      /* ── Metrics ── */
+      div[data-testid="stMetric"] {
+        background: white !important;
+        border: 1.5px solid #e2e8f0 !important;
+        border-radius: 12px !important;
+        padding: 16px 20px !important;
+        box-shadow: 0 2px 8px rgba(37,99,235,0.06) !important;
+      }
+      div[data-testid="stMetricLabel"] {
+        font-size: 11px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.06em !important;
+        text-transform: uppercase !important;
+        color: #64748b !important;
+      }
+      div[data-testid="stMetricValue"] {
+        font-size: 26px !important;
+        font-weight: 800 !important;
+        color: #0f172a !important;
+        letter-spacing: -0.02em !important;
+      }
+
+      /* ── Info / Warning / Success boxes ── */
+      div[data-testid="stAlert"] {
+        border-radius: 10px !important;
+        border-width: 1.5px !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 13.5px !important;
+        font-weight: 500 !important;
+      }
+      div[data-testid="stAlert"][data-baseweb="notification"] {
+        border-radius: 10px !important;
+      }
+
+      /* ── Number input ── */
+      div[data-testid="stNumberInput"] input {
+        border-radius: 8px !important;
+        border: 1.5px solid #e2e8f0 !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 16px !important;
+        font-weight: 600 !important;
+        color: #0f172a !important;
+        background: white !important;
+      }
+      div[data-testid="stNumberInput"] input:focus {
+        border-color: #2563eb !important;
+        box-shadow: 0 0 0 3px rgba(37,99,235,0.1) !important;
+      }
+
+      /* ── Text inputs ── */
+      div[data-testid="stTextInput"] input,
+      div[data-testid="stTextInputRootElement"] input {
+        border-radius: 8px !important;
+        border: 1.5px solid #e2e8f0 !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 13px !important;
+        background: white !important;
+      }
+      div[data-testid="stTextInput"] input:focus,
+      div[data-testid="stTextInputRootElement"] input:focus {
+        border-color: #2563eb !important;
+        box-shadow: 0 0 0 3px rgba(37,99,235,0.1) !important;
+      }
+
+      /* ── Selectbox ── */
+      div[data-testid="stSelectbox"] > div > div {
+        border-radius: 8px !important;
+        border: 1.5px solid #e2e8f0 !important;
+        background: white !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 13px !important;
+      }
+
+      /* ── Captions ── */
+      div[data-testid="stCaptionContainer"],
+      small, .stCaption {
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 12px !important;
+        color: #94a3b8 !important;
+      }
+
+      /* ── Spinner ── */
+      div[data-testid="stSpinner"] p {
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        color: #2563eb !important;
+        font-weight: 500 !important;
+      }
+
+      /* ── Page-load fade ── */
+      @keyframes pg-fade {
+        from { opacity: 0; transform: translateY(10px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .stMainBlockContainer > div > div {
+        animation: pg-fade 0.4s cubic-bezier(.22,1,.36,1) both;
+      }
+    </style>
+    """)
+
+
+def _use_twothirds_layout():
+    """Constrain the page to 2/3 of the viewport width, centered."""
+    st.html("""
+    <style>
+      section[data-testid="stMain"] .stMainBlockContainer {
+        max-width: 66.67vw !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+      }
+    </style>
+    """)
+
+
 # ── Welcome ──────────────────────────────────────────────────────────────────
 
 def render_welcome():
+    _use_twothirds_layout()
     st.html("""
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
@@ -505,8 +791,17 @@ def render_welcome():
 # ── Setup ────────────────────────────────────────────────────────────────────
 
 def render_setup():
-    st.title("Exam Setup / Configuration de l'examen")
-    st.divider()
+    _inject_design_system()
+    st.html("""
+    <div style="margin-bottom:20px">
+      <span style="display:inline-flex;align-items:center;gap:6px;background:rgba(37,99,235,0.08);color:#2563eb;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.06em;padding:4px 12px;border-radius:100px;border:1px solid rgba(37,99,235,0.18);margin-bottom:10px">
+        SLE Practice Tool
+      </span>
+      <h1 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:26px;font-weight:800;color:#0f172a;letter-spacing:-0.02em;margin:0 0 4px 0">Exam Setup</h1>
+      <p style="font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;color:#64748b;margin:0;font-style:italic">Configuration de l'examen</p>
+      <div style="height:2px;background:linear-gradient(90deg,#2563eb,rgba(37,99,235,0.1));border-radius:2px;margin-top:16px"></div>
+    </div>
+    """)
 
     num_questions = st.number_input(
         "How many questions? / Combien de questions ?",
@@ -677,15 +972,23 @@ def render_setup():
 # ── Exam ─────────────────────────────────────────────────────────────────────
 
 def render_exam():
+    _inject_design_system()
     exam = st.session_state.exam
     if not exam:
         go_to("welcome")
         st.rerun()
         return
 
-    st.title("Exam / Examen")
-    st.markdown(f"**Session:** {exam['session_id']} | **Questions:** {exam['num_questions']}")
-    st.divider()
+    st.html(f"""
+    <div style="margin-bottom:20px">
+      <span style="display:inline-flex;align-items:center;gap:6px;background:rgba(37,99,235,0.08);color:#2563eb;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.06em;padding:4px 12px;border-radius:100px;border:1px solid rgba(37,99,235,0.18);margin-bottom:10px">
+        {exam['num_questions']} questions
+      </span>
+      <h1 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:26px;font-weight:800;color:#0f172a;letter-spacing:-0.02em;margin:0 0 4px 0">Exam</h1>
+      <p style="font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;color:#64748b;margin:0;font-style:italic">Examen · {exam['session_id']}</p>
+      <div style="height:2px;background:linear-gradient(90deg,#2563eb,rgba(37,99,235,0.1));border-radius:2px;margin-top:16px"></div>
+    </div>
+    """)
 
     # Show review warnings if any
     review = st.session_state.get("exam_review")
@@ -778,29 +1081,48 @@ def render_exam():
 # ── Results ──────────────────────────────────────────────────────────────────
 
 def render_results():
+    _inject_design_system()
     evaluation = st.session_state.evaluation
     if not evaluation:
         go_to("welcome")
         st.rerun()
         return
 
-    st.title("Results / Résultats")
-    st.divider()
-
-    # Score summary
     score = evaluation["score"]
     total = evaluation["total"]
     pct = evaluation["percentage"]
     level = evaluation["level"]
+    level_color_map = {"C": "#16a34a", "B": "#d97706", "A": "#ea580c"}
+    level_bg_map   = {"C": "#f0fdf4", "B": "#fffbeb", "A": "#fff7ed"}
+    level_bd_map   = {"C": "#86efac", "B": "#fde68a", "A": "#fdba74"}
+    lc = level_color_map.get(level, "#dc2626")
+    lb = level_bg_map.get(level, "#fef2f2")
+    ld = level_bd_map.get(level, "#fca5a5")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Score", f"{score} / {total}")
-    with col2:
-        st.metric("Percentage", f"{pct}%")
-    with col3:
-        level_color = {"C": "🟢", "B": "🟡", "A": "🟠"}.get(level, "🔴")
-        st.metric("Level / Niveau", f"{level_color} {level}")
+    st.html(f"""
+    <div style="margin-bottom:20px">
+      <span style="display:inline-flex;align-items:center;gap:6px;background:rgba(37,99,235,0.08);color:#2563eb;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.06em;padding:4px 12px;border-radius:100px;border:1px solid rgba(37,99,235,0.18);margin-bottom:10px">
+        Exam complete
+      </span>
+      <h1 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:26px;font-weight:800;color:#0f172a;letter-spacing:-0.02em;margin:0 0 4px 0">Results</h1>
+      <p style="font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;color:#64748b;margin:0;font-style:italic">Résultats</p>
+      <div style="height:2px;background:linear-gradient(90deg,#2563eb,rgba(37,99,235,0.1));border-radius:2px;margin-top:16px;margin-bottom:20px"></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+        <div style="background:white;border:1.5px solid #e2e8f0;border-radius:12px;padding:16px 20px;box-shadow:0 2px 8px rgba(37,99,235,0.06)">
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:6px">Score</div>
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:28px;font-weight:800;color:#0f172a;letter-spacing:-0.02em">{score} <span style="font-size:16px;font-weight:500;color:#94a3b8">/ {total}</span></div>
+        </div>
+        <div style="background:white;border:1.5px solid #e2e8f0;border-radius:12px;padding:16px 20px;box-shadow:0 2px 8px rgba(37,99,235,0.06)">
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:6px">Percentage</div>
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:28px;font-weight:800;color:#0f172a;letter-spacing:-0.02em">{pct}<span style="font-size:16px;font-weight:500;color:#94a3b8">%</span></div>
+        </div>
+        <div style="background:{lb};border:1.5px solid {ld};border-radius:12px;padding:16px 20px;box-shadow:0 2px 8px rgba(37,99,235,0.06)">
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:{lc};margin-bottom:6px">Level / Niveau</div>
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:28px;font-weight:800;color:{lc};letter-spacing:-0.02em">{level}</div>
+        </div>
+      </div>
+    </div>
+    """)
 
     st.divider()
 
