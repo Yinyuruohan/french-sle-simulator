@@ -139,3 +139,74 @@ def test_cleanup_empty_reviews_deletes_unrated(db_path):
     remaining = conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
     conn.close()
     assert remaining == 1
+
+
+# ── Task 3: get_contexts_for_review ──────────────────────────────────────────
+
+def test_get_contexts_for_review_returns_all(db_path):
+    """get_contexts_for_review with no filters returns all contexts."""
+    from tools.grader_db import init_reviews_table, get_contexts_for_review
+
+    context_ids = _seed_contexts(db_path, 3)
+    init_reviews_table()
+
+    result = get_contexts_for_review({})
+    assert result["total"] == 3
+    assert len(result["items"]) == 3
+    returned_ids = {item["context_id"] for item in result["items"]}
+    assert returned_ids == set(context_ids)
+
+
+def test_get_contexts_for_review_filter_status(db_path):
+    """get_contexts_for_review filters by status correctly."""
+    from tools.grader_db import init_reviews_table, get_contexts_for_review
+
+    context_ids = _seed_contexts(db_path, 2)
+    init_reviews_table()
+
+    # Update one context to 'battle_tested'
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE contexts SET status = 'battle_tested' WHERE context_id = ?",
+        (context_ids[0],),
+    )
+    conn.commit()
+    conn.close()
+
+    result = get_contexts_for_review({"status": "reviewed"})
+    assert result["total"] == 1
+    assert result["items"][0]["context_id"] == context_ids[1]
+
+    result2 = get_contexts_for_review({"status": "battle_tested"})
+    assert result2["total"] == 1
+    assert result2["items"][0]["context_id"] == context_ids[0]
+
+
+def test_get_contexts_for_review_filter_flagged(db_path):
+    """get_contexts_for_review filters by flagged (user_flags >= 1) correctly."""
+    from tools.grader_db import init_reviews_table, get_contexts_for_review
+
+    context_ids = _seed_contexts(db_path, 3)
+    init_reviews_table()
+
+    # Flag the first two contexts
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE contexts SET user_flags = 2 WHERE context_id = ?", (context_ids[0],)
+    )
+    conn.execute(
+        "UPDATE contexts SET user_flags = 1 WHERE context_id = ?", (context_ids[1],)
+    )
+    conn.commit()
+    conn.close()
+
+    flagged = get_contexts_for_review({"flagged": "true"})
+    assert flagged["total"] == 2
+
+    unflagged = get_contexts_for_review({"flagged": "false"})
+    assert unflagged["total"] == 1
+    assert unflagged["items"][0]["context_id"] == context_ids[2]
+
+
+# test_get_contexts_for_review_filter_reviewed and test_get_contexts_for_review_combined_filters
+# require save_review (Task 4) — added in the next commit.
