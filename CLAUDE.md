@@ -8,6 +8,7 @@ This app generates realistic French SLE Written Expression exam questions via a 
 
 **Key entry points:**
 - `streamlit run app.py` — launches the web UI
+- `python grader/app.py` — launches the LLM Grader expert review interface (port 5001)
 - `tools/model_config.py` — `ModelConfig` dataclass + `load_default_configs()`; single source of truth for AI model settings
 - `tools/generate_exam.py` — generates exam questions (AI API)
 - `tools/evaluate_exam.py` — grades answers and generates feedback (AI API)
@@ -27,16 +28,25 @@ This app generates realistic French SLE Written Expression exam questions via a 
 
 ```
 app.py                    # Streamlit web UI (4 stages: welcome → setup → exam → results)
+grader/
+  app.py                  # Flask app: REST API + static file serving for expert review
+  static/
+    index.html            # SPA entry point (list + detail views, hash-based routing)
+    style.css             # Grader styles (Plus Jakarta Sans, blue palette)
+    app.js                # Vanilla JS: API calls, view rendering, state management
 tools/
   model_config.py         # ModelConfig dataclass + load_default_configs(); per-tool AI model settings
   generate_exam.py        # AI API call to generate contexts→questions with A/B/C/D
   evaluate_exam.py        # Grade answers, generate explanations, save feedback, track errors
   review_exam.py          # Conservative QA review of exam questions and feedback explanations
   question_bank.py        # SQLite question bank: cache, assemble, prefill
+  grader_db.py            # Reviews table: init, CRUD, filtered queries, staleness detection
 tests/
   test_model_config.py    # Unit tests for model_config.py (6 tests)
   test_generate_exam.py   # ModelConfig wiring tests for generate_exam.py (3 tests)
   test_question_bank.py   # Unit tests for question_bank.py (17 tests)
+  test_grader_db.py       # Unit tests for grader_db.py (19 tests)
+  test_grader_api.py      # Integration tests for grader Flask API (11 tests)
 workflows/
   sle_exam_simulator.md   # Full SOP for the exam workflow
 contexts/
