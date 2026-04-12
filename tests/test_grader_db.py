@@ -418,6 +418,17 @@ def test_is_snapshot_outdated_returns_none_when_no_review(db_path):
     assert result is None
 
 
+def test_get_contexts_for_review_includes_type(db_path):
+    """get_contexts_for_review items include context type."""
+    from tools.grader_db import init_reviews_table, get_contexts_for_review
+    _seed_contexts(db_path, 3)
+    init_reviews_table()
+    result = get_contexts_for_review({})
+    for item in result["items"]:
+        assert "type" in item
+        assert item["type"] in ("fill_in_blank", "error_identification")
+
+
 def test_is_snapshot_outdated_returns_none_when_context_deleted(db_path):
     """is_snapshot_outdated returns None when context has been deleted from contexts table."""
     from tools.grader_db import init_reviews_table, save_review, is_snapshot_outdated

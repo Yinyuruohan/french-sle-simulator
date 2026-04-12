@@ -95,7 +95,7 @@ def get_contexts_for_review(filters: dict) -> dict:
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     query = f"""
-        SELECT c.context_id, c.status, c.user_flags, r.expert_rating
+        SELECT c.context_id, c.type, c.status, c.user_flags, r.expert_rating
         FROM contexts c
         LEFT JOIN reviews r ON c.context_id = r.context_id
         {where_clause}
@@ -111,6 +111,7 @@ def get_contexts_for_review(filters: dict) -> dict:
     items = [
         {
             "context_id": row["context_id"],
+            "type": row["type"],
             "status": row["status"],
             "user_flags": row["user_flags"],
             "expert_rating": row["expert_rating"],
