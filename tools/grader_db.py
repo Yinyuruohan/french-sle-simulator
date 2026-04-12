@@ -213,3 +213,97 @@ def save_review(context_id: str, expert_rating: str, expert_critique: str | None
             return {"updated_at": now}
     finally:
         conn.close()
+
+
+# ── Task 5: snapshot staleness detection ─────────────────────────────────────
+
+def _context_data_hash(context_data: dict) -> str:
+    """
+    Compute SHA-256 hash of context data for staleness comparison.
+
+    Hashes {passage, questions, grammar_topics} with sorted keys.
+    """
+    subset = {
+        "passage": context_data["passage"],
+        "questions": context_data["questions"],
+        "grammar_topics": context_data["grammar_topics"],
+    }
+    canonical = json.dumps(subset, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def is_snapshot_outdated(context_id: str) -> bool | None:
+    """
+    Compare snapshot hash to current context hash.
+
+    Returns:
+        False — snapshot matches current context (up to date)
+        True  — snapshot differs from current context (outdated)
+        None  — no review exists, or context has been deleted
+    """
+    conn = _get_conn()
+    try:
+        review_row = conn.execute(
+            "SELECT model_output FROM reviews WHERE context_id = ?", (context_id,)
+        ).fetchone()
+
+        if review_row is None:
+            return None
+
+        context_row = conn.execute(
+            "SELECT passage, questions_json, grammar_topics FROM contexts WHERE context_id = ?",
+            (context_id,),
+        ).fetchone()
+
+        if context_row is None:
+            return None
+
+    finally:
+        conn.close()
+
+    # Parse snapshot from stored model_output JSON
+    snapshot = json.loads(review_row["model_output"])
+    snapshot_hash = _context_data_hash({
+        "passage": snapshot["passage"],
+        "questions": snapshot["questions"],
+        "grammar_topics": snapshot["grammar_topics"],
+    })
+
+    # Compute current context hash
+    current_data = {
+        "passage": context_row["passage"],
+        "questions": json.loads(context_row["questions_json"]),
+        "grammar_topics": context_row["grammar_topics"],
+    }
+    current_hash = _context_data_hash(current_data)
+
+    return snapshot_hash != current_hash
+
+
+def get_context_data(context_id: str) -> dict | None:
+    """
+    Read live context data from contexts table.
+
+    Returns dict with context fields or None if not found.
+    """
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT context_id, type, passage, questions_json, grammar_topics, status "
+            "FROM contexts WHERE context_id = ?",
+            (context_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+
+    return {
+        "context_id": row["context_id"],
+        "type": row["type"],
+        "passage": row["passage"],
+        "questions": json.loads(row["questions_json"]),
+        "grammar_topics": row["grammar_topics"],
+        "status": row["status"],
+    }

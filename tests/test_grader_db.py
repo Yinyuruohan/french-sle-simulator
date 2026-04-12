@@ -367,3 +367,71 @@ def test_save_review_returns_none_for_missing_context(db_path):
 
     result = save_review("does-not-exist", "good", "critique")
     assert result is None
+
+
+# ── Task 5: snapshot staleness detection ─────────────────────────────────────
+
+def test_is_snapshot_outdated_returns_false_when_unchanged(db_path):
+    """is_snapshot_outdated returns False when context data matches the snapshot."""
+    from tools.grader_db import init_reviews_table, save_review, is_snapshot_outdated
+
+    context_ids = _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    save_review(context_ids[0], "good", None)
+
+    result = is_snapshot_outdated(context_ids[0])
+    assert result is False
+
+
+def test_is_snapshot_outdated_returns_true_when_passage_changed(db_path):
+    """is_snapshot_outdated returns True when the context passage has changed."""
+    from tools.grader_db import init_reviews_table, save_review, is_snapshot_outdated
+
+    context_ids = _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    # Save review (snapshot taken now)
+    save_review(context_ids[0], "good", None)
+
+    # Mutate the passage in contexts table
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE contexts SET passage = 'Completely different passage text.' WHERE context_id = ?",
+        (context_ids[0],),
+    )
+    conn.commit()
+    conn.close()
+
+    result = is_snapshot_outdated(context_ids[0])
+    assert result is True
+
+
+def test_is_snapshot_outdated_returns_none_when_no_review(db_path):
+    """is_snapshot_outdated returns None when no review exists for context_id."""
+    from tools.grader_db import init_reviews_table, is_snapshot_outdated
+
+    context_ids = _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    result = is_snapshot_outdated(context_ids[0])
+    assert result is None
+
+
+def test_is_snapshot_outdated_returns_none_when_context_deleted(db_path):
+    """is_snapshot_outdated returns None when context has been deleted from contexts table."""
+    from tools.grader_db import init_reviews_table, save_review, is_snapshot_outdated
+
+    context_ids = _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    save_review(context_ids[0], "good", None)
+
+    # Delete the context from contexts table
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM contexts WHERE context_id = ?", (context_ids[0],))
+    conn.commit()
+    conn.close()
+
+    result = is_snapshot_outdated(context_ids[0])
+    assert result is None
