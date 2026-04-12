@@ -23,7 +23,7 @@ question_bank.db       # Shared SQLite — adds `reviews` table
 
 ### How It Runs
 
-- `python grader/app.py` starts Flask on port 5001
+- `python grader/app.py` starts Flask on port 5001 (configurable via `GRADER_PORT` env var or `--port` CLI argument)
 - Flask serves the SPA at `/` and the API at `/api/*`
 - The Streamlit simulator continues independently on port 8501
 
@@ -31,6 +31,7 @@ question_bank.db       # Shared SQLite — adds `reviews` table
 
 - `tools/grader_db.py` owns all reviews table operations; Flask never writes SQL directly
 - `tools/question_bank.py` is read-only from the grader — queries contexts, never modifies them
+- The grader writes only to the `reviews` table and never touches the `contexts` table
 - The SPA talks exclusively to `/api/*` endpoints
 
 ## Database Schema
@@ -49,6 +50,9 @@ CREATE TABLE IF NOT EXISTS reviews (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+-- No FOREIGN KEY on context_id → contexts.context_id, intentionally omitted.
+-- Reviews must outlive deleted/regenerated contexts since model_output is a
+-- self-contained snapshot of the content that was reviewed.
 ```
 
 ### Column Details
@@ -85,7 +89,9 @@ CREATE TABLE IF NOT EXISTS reviews (
 }
 ```
 
-The snapshot is taken when the review record is first created (on first detail view access). This makes reviews durable — they retain the exact content that was reviewed even if the context is later deleted or modified.
+The snapshot is taken when the review record is first created (on first PUT). This makes reviews durable — they retain the exact content that was reviewed even if the context is later deleted or modified.
+
+**Snapshot staleness:** If a context is regenerated after a review snapshot was taken, the UI should display a "snapshot outdated" indicator in the detail view. Detection: compare a hash of the current context data against the snapshotted `model_output`. If the context no longer exists in the bank, no indicator is needed (the review simply stands alone).
 
 ### Data Layer — `tools/grader_db.py`
 
@@ -93,13 +99,15 @@ Functions:
 
 - `init_reviews_table()` — create table if not exists
 - `get_contexts_for_review(filters)` — query `contexts` table with optional filters (status, user_flags, has_review), left-joined with `reviews` to include review status. Returns list of summary dicts.
-- `get_or_create_review(context_id)` — fetch existing review or create one by snapshotting the context from the `contexts` table. Returns full review dict.
-- `save_review(context_id, expert_rating, expert_critique)` — upsert rating and critique, update `updated_at`. Returns updated timestamp.
-- `get_filtered_context_ids(filters)` — returns ordered list of context_ids matching current filters. Used by sidebar navigator and Prev/Next.
+- `get_review(context_id)` — fetch existing review if one exists. Returns review dict or None.
+- `create_review(context_id)` — snapshot the context from the `contexts` table and create a new review record. Called on first PUT, not on GET. Returns full review dict.
+- `save_review(context_id, expert_rating, expert_critique)` — upsert rating and critique, update `updated_at`. Creates the review record (with snapshot) if one doesn't exist yet. Returns updated timestamp.
+- `cleanup_empty_reviews()` — delete review records where `expert_rating` IS NULL (viewed but never rated). Expected to be called periodically or on startup.
+- `get_filtered_context_ids(filters)` — returns ordered list of context_ids matching current filters. Used by `GET /api/contexts`.
 
 ## REST API
 
-Four endpoints under `/api/`:
+Three endpoints under `/api/`:
 
 ### GET /api/contexts
 
@@ -112,32 +120,41 @@ List view data with optional filters (all combinable).
 
 **Response:**
 ```json
-[
-  {
-    "context_id": "uuid",
-    "status": "reviewed",
-    "user_flags": 0,
-    "expert_rating": "Good"
-  }
-]
+{
+  "total": 29,
+  "items": [
+    {
+      "context_id": "uuid",
+      "status": "reviewed",
+      "user_flags": 0,
+      "expert_rating": "Good"
+    }
+  ]
+}
 ```
 
 ### GET /api/contexts/{context_id}
 
-Single-item detail data. Creates the review record + model_output snapshot on first access if one doesn't exist yet.
+Single-item detail data. Returns context data and existing review (if any). Does **not** create a review record — snapshot creation is deferred to the first PUT (see below).
 
 **Response:**
 ```json
 {
   "context_id": "uuid",
-  "model_output": { "..." },
-  "expert_rating": "Good",
-  "expert_critique": "...",
-  "llm_evaluator_rating": null,
-  "llm_evaluator_critique": null,
-  "agreement": null
+  "context_data": { "..." },
+  "review": {
+    "model_output": { "..." },
+    "expert_rating": "Good",
+    "expert_critique": "...",
+    "llm_evaluator_rating": null,
+    "llm_evaluator_critique": null,
+    "agreement": null,
+    "snapshot_outdated": false
+  }
 }
 ```
+
+`review` is `null` if no review exists yet. `context_data` is read live from the `contexts` table. `snapshot_outdated` is `true` when the live context data differs from the review's `model_output` snapshot.
 
 ### PUT /api/contexts/{context_id}/review
 
@@ -161,21 +178,7 @@ Submit or update an expert review.
 
 **Validation:** `expert_rating` must be `"Good"` or `"Bad"`. Returns 400 otherwise.
 
-### GET /api/contexts/{context_id}/neighbors
-
-Previous/Next navigation within the filtered list.
-
-**Query params:** same as `GET /api/contexts`
-
-**Response:**
-```json
-{
-  "previous": "uuid",
-  "next": "uuid"
-}
-```
-
-Returns null for `previous`/`next` when at the start/end of the filtered list.
+**Neighbors:** No dedicated endpoint. The SPA computes previous/next client-side from the cached `contextList` returned by `GET /api/contexts`, eliminating a round trip per navigation click.
 
 **Error handling:** All endpoints return JSON. 404 for unknown context_id, 400 for invalid params.
 
@@ -204,7 +207,7 @@ Clicking a row navigates to `#/review/<context_id>`.
 Three-column layout:
 
 **Left — Context navigator sidebar** (180px, sticky):
-- Scrollable list of context IDs (truncated) from the filtered set
+- Scrollable list from the filtered set, each item labeled with a short descriptor (e.g., "Fill-in #3" / "Error-ID #7") rather than truncated UUIDs
 - Annotation indicator per item: green filled dot = reviewed, empty gray circle = not reviewed
 - Currently selected item highlighted with blue background + blue left border
 - Click any item to load it without returning to list view
@@ -239,9 +242,10 @@ Flow:
 1. List view loads → filters from `sessionStorage` → fetch `GET /api/contexts` → render table
 2. Filter change → update `sessionStorage` → re-fetch → re-render
 3. Row click → `#/review/<id>` → fetch detail + render sidebar from cached `contextList`
-4. Sidebar/Prev/Next click → update hash → fetch new detail → re-render middle + right
-5. Review submit → `PUT` → update sidebar dot immediately → stay on view
-6. Back to list → `#/` → re-fetch with current filters
+4. **Direct URL access** (bookmark/shared link to `#/review/<id>` with no cached list) → fetch unfiltered `GET /api/contexts` first to populate sidebar, then fetch detail
+5. Sidebar/Prev/Next click → update hash → fetch new detail → re-render middle + right
+6. Review submit → `PUT` → update sidebar dot optimistically → on failure, show error toast and revert dot → stay on view
+7. Back to list → `#/` → re-fetch with current filters
 
 ### Styling
 
@@ -253,6 +257,7 @@ Flow:
 ## Out of Scope
 
 - Authentication / reviewer identity tracking
+- Concurrent multi-user editing — SQLite backend with no auth means two experts could overwrite each other's reviews; single-user assumed
 - LLM evaluator — columns created but always NULL
 - Agreement computation — column created but always NULL
 - Pagination — not needed at current scale
