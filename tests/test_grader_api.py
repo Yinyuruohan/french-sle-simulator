@@ -17,9 +17,12 @@ def db_path(tmp_path):
     path = str(tmp_path / "test_grader_api.db")
     import tools.question_bank as qb
     import tools.grader_db as gdb
+    old_qb, old_gdb = qb.DB_PATH, gdb.DB_PATH
     qb.DB_PATH = path
     gdb.DB_PATH = path
     yield path
+    qb.DB_PATH = old_qb
+    gdb.DB_PATH = old_gdb
 
 
 @pytest.fixture

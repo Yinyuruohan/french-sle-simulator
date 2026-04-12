@@ -44,6 +44,8 @@ def create_app():
 
     @app.route("/<path:filename>")
     def static_files(filename):
+        if filename.startswith("api/"):
+            return jsonify({"error": "Not found"}), 404
         return send_from_directory(STATIC_DIR, filename)
 
     # ── GET /api/contexts ─────────────────────────────────────────────────────
