@@ -208,5 +208,162 @@ def test_get_contexts_for_review_filter_flagged(db_path):
     assert unflagged["items"][0]["context_id"] == context_ids[2]
 
 
-# test_get_contexts_for_review_filter_reviewed and test_get_contexts_for_review_combined_filters
-# require save_review (Task 4) — added in the next commit.
+def test_get_contexts_for_review_filter_reviewed(db_path):
+    """get_contexts_for_review filters by reviewed (expert_rating IS NOT NULL) correctly."""
+    from tools.grader_db import init_reviews_table, get_contexts_for_review, save_review
+
+    context_ids = _seed_contexts(db_path, 3)
+    init_reviews_table()
+
+    # Save a review for the first context
+    save_review(context_ids[0], "good", "Looks fine.")
+
+    reviewed = get_contexts_for_review({"reviewed": "true"})
+    assert reviewed["total"] == 1
+    assert reviewed["items"][0]["context_id"] == context_ids[0]
+    assert reviewed["items"][0]["expert_rating"] == "good"
+
+    unreviewed = get_contexts_for_review({"reviewed": "false"})
+    assert unreviewed["total"] == 2
+    unreviewed_ids = {item["context_id"] for item in unreviewed["items"]}
+    assert context_ids[1] in unreviewed_ids
+    assert context_ids[2] in unreviewed_ids
+
+
+def test_get_contexts_for_review_combined_filters(db_path):
+    """get_contexts_for_review applies multiple filters with AND logic."""
+    from tools.grader_db import init_reviews_table, get_contexts_for_review, save_review
+
+    context_ids = _seed_contexts(db_path, 4)
+    init_reviews_table()
+
+    # context_ids[0]: reviewed=True, flagged=True, status=reviewed
+    save_review(context_ids[0], "good", None)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE contexts SET user_flags = 1 WHERE context_id = ?", (context_ids[0],)
+    )
+    # context_ids[1]: reviewed=True, flagged=False, status=reviewed
+    conn.commit()
+    conn.close()
+    save_review(context_ids[1], "bad", "Issues found.")
+
+    # Filter: reviewed=true AND flagged=true
+    result = get_contexts_for_review({"reviewed": "true", "flagged": "true"})
+    assert result["total"] == 1
+    assert result["items"][0]["context_id"] == context_ids[0]
+
+    # Filter: reviewed=false AND status=reviewed
+    result2 = get_contexts_for_review({"reviewed": "false", "status": "reviewed"})
+    assert result2["total"] == 2
+    returned_ids = {item["context_id"] for item in result2["items"]}
+    assert context_ids[2] in returned_ids
+    assert context_ids[3] in returned_ids
+
+
+# ── Task 4: get_review and save_review ───────────────────────────────────────
+
+def test_get_review_returns_none_when_missing(db_path):
+    """get_review returns None when no review exists for the given context_id."""
+    from tools.grader_db import init_reviews_table, get_review
+
+    _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    result = get_review("nonexistent-id")
+    assert result is None
+
+
+def test_get_review_returns_existing_review(db_path):
+    """get_review returns the review dict when it exists."""
+    from tools.grader_db import init_reviews_table, get_review, save_review
+
+    context_ids = _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    save_review(context_ids[0], "excellent", "Very clear questions.")
+
+    review = get_review(context_ids[0])
+    assert review is not None
+    assert review["context_id"] == context_ids[0]
+    assert review["expert_rating"] == "excellent"
+    assert review["expert_critique"] == "Very clear questions."
+    assert review["model_output"] is not None  # snapshot was stored
+    assert review["created_at"] is not None
+    assert review["updated_at"] is not None
+
+
+def test_save_review_creates_snapshot_on_first_save(db_path):
+    """save_review stores a context snapshot in model_output on first insert."""
+    from tools.grader_db import init_reviews_table, save_review, get_review
+
+    context_ids = _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    result = save_review(context_ids[0], "good", "OK")
+    assert result is not None
+    assert "updated_at" in result
+
+    review = get_review(context_ids[0])
+    assert review is not None
+
+    snapshot = json.loads(review["model_output"])
+    assert snapshot["context_id"] == context_ids[0]
+    assert "passage" in snapshot
+    assert "questions" in snapshot
+    assert "grammar_topics" in snapshot
+    assert "type" in snapshot
+    assert "status" in snapshot
+
+
+def test_save_review_updates_existing_review(db_path):
+    """save_review updates rating, critique, and updated_at on subsequent calls."""
+    from tools.grader_db import init_reviews_table, save_review, get_review
+
+    context_ids = _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    first_result = save_review(context_ids[0], "good", "Initial critique.")
+    assert first_result is not None
+
+    second_result = save_review(context_ids[0], "bad", "Updated critique.")
+    assert second_result is not None
+
+    review = get_review(context_ids[0])
+    assert review["expert_rating"] == "bad"
+    assert review["expert_critique"] == "Updated critique."
+    assert review["updated_at"] is not None
+
+    # Verify only one row exists
+    conn = sqlite3.connect(db_path)
+    count = conn.execute(
+        "SELECT COUNT(*) FROM reviews WHERE context_id = ?", (context_ids[0],)
+    ).fetchone()[0]
+    conn.close()
+    assert count == 1
+
+
+def test_save_review_without_critique(db_path):
+    """save_review accepts None for expert_critique."""
+    from tools.grader_db import init_reviews_table, save_review, get_review
+
+    context_ids = _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    result = save_review(context_ids[0], "acceptable", None)
+    assert result is not None
+
+    review = get_review(context_ids[0])
+    assert review["expert_rating"] == "acceptable"
+    assert review["expert_critique"] is None
+
+
+def test_save_review_returns_none_for_missing_context(db_path):
+    """save_review returns None when context_id does not exist in contexts table."""
+    from tools.grader_db import init_reviews_table, save_review
+
+    _seed_contexts(db_path, 0)
+    init_reviews_table()
+
+    result = save_review("does-not-exist", "good", "critique")
+    assert result is None

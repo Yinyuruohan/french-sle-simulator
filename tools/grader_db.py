@@ -121,8 +121,95 @@ def get_contexts_for_review(filters: dict) -> dict:
     return {"total": len(items), "items": items}
 
 
-# ── Task 4 stub (placeholder for commit boundary) ────────────────────────────
+# ── Task 4: get_review and save_review ───────────────────────────────────────
 
-def save_review(context_id: str, expert_rating: str, expert_critique) -> dict | None:
-    """Stub — implemented in Task 4."""
-    raise NotImplementedError("save_review is implemented in Task 4")
+def _snapshot_context(conn: sqlite3.Connection, context_id: str) -> str | None:
+    """
+    Read context from contexts table and return a JSON snapshot string.
+
+    Returns JSON string of {context_id, type, passage, questions, grammar_topics, status}
+    or None if context not found.
+    """
+    row = conn.execute(
+        "SELECT context_id, type, passage, questions_json, grammar_topics, status "
+        "FROM contexts WHERE context_id = ?",
+        (context_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    snapshot = {
+        "context_id": row["context_id"],
+        "type": row["type"],
+        "passage": row["passage"],
+        "questions": json.loads(row["questions_json"]),
+        "grammar_topics": row["grammar_topics"],
+        "status": row["status"],
+    }
+    return json.dumps(snapshot, ensure_ascii=False)
+
+
+def get_review(context_id: str) -> dict | None:
+    """
+    Retrieve a review by context_id.
+
+    Returns dict(row) or None if not found.
+    """
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM reviews WHERE context_id = ?", (context_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+    return dict(row)
+
+
+def save_review(context_id: str, expert_rating: str, expert_critique: str | None) -> dict | None:
+    """
+    Create or update a review for the given context_id.
+
+    If review exists: UPDATE expert_rating, expert_critique, updated_at.
+    If review is new: create a snapshot of the context and INSERT.
+
+    Returns {"updated_at": <iso string>} or None if context not found in contexts table.
+    """
+    now = datetime.now().isoformat()
+
+    conn = _get_conn()
+    try:
+        existing = conn.execute(
+            "SELECT context_id FROM reviews WHERE context_id = ?", (context_id,)
+        ).fetchone()
+
+        if existing:
+            conn.execute(
+                """UPDATE reviews
+                   SET expert_rating = ?, expert_critique = ?, updated_at = ?
+                   WHERE context_id = ?""",
+                (expert_rating, expert_critique, now, context_id),
+            )
+            conn.commit()
+            return {"updated_at": now}
+        else:
+            # New review — create snapshot
+            snapshot = _snapshot_context(conn, context_id)
+            if snapshot is None:
+                return None
+
+            conn.execute(
+                """INSERT INTO reviews
+                   (context_id, model_output, expert_rating, expert_critique,
+                    llm_evaluator_rating, llm_evaluator_critique, agreement,
+                    created_at, updated_at)
+                   VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?)""",
+                (context_id, snapshot, expert_rating, expert_critique, now, now),
+            )
+            conn.commit()
+            return {"updated_at": now}
+    finally:
+        conn.close()
