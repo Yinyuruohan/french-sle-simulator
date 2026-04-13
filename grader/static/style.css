@@ -54,6 +54,14 @@ header h1 {
     cursor: pointer;
 }
 
+/* ── Results count ─────────────────────────────────────────────────────────── */
+.results-count {
+    font-size: 13px;
+    color: #64748b;
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
 /* ── Table ─────────────────────────────────────────────────────────────────── */
 .ctx-table {
     width: 100%;

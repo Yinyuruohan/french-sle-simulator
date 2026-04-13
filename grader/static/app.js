@@ -101,6 +101,8 @@
           </div>
         </div>
 
+        <div class="results-count" id="results-count"></div>
+
         <table class="ctx-table">
           <thead>
             <tr>
@@ -128,6 +130,14 @@
       setVal("f-status", "status");
       setVal("f-flagged", "flagged");
       setVal("f-reviewed", "reviewed");
+
+      // Render context count
+      const hasFilters = Object.keys(state.filters).some((k) => state.filters[k]);
+      const countEl = document.getElementById("results-count");
+      const total = data.total;
+      countEl.textContent = hasFilters
+        ? `${total} context${total !== 1 ? "s" : ""} match the active filters`
+        : `${total} context${total !== 1 ? "s" : ""} total`;
 
       // Render rows
       const tbody = document.getElementById("ctx-tbody");
