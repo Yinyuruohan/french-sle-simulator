@@ -14,8 +14,9 @@ import os
 import random
 import re
 import sys
+import time
 from datetime import datetime
-from openai import OpenAI
+from openai import OpenAI, APIStatusError
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.model_config import ModelConfig, load_default_configs
@@ -264,16 +265,25 @@ IMPORTANT RULES:
 
     max_attempts = 2
     for attempt in range(max_attempts):
-        response = client.chat.completions.create(
-            model=cfg.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.7,
-            max_tokens=16000,
-            response_format={"type": "json_object"}
-        )
+        try:
+            response = client.chat.completions.create(
+                model=cfg.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=16000,
+                response_format={"type": "json_object"}
+            )
+        except APIStatusError as exc:
+            if exc.status_code >= 500 and attempt < max_attempts - 1:
+                time.sleep(3)
+                continue
+            raise RuntimeError(
+                f"The AI service is temporarily unavailable (HTTP {exc.status_code}). "
+                "Please try again in a moment."
+            ) from exc
 
         finish_reason = response.choices[0].finish_reason
         raw_content = response.choices[0].message.content.strip()
@@ -492,16 +502,27 @@ Return a JSON object with this structure:
 IMPORTANT: Do not reference option letters (A, B, C, D) in explanations.
 Return ONLY the JSON object."""
 
-    response = client.chat.completions.create(
-        model=cfg.model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.3,
-        max_tokens=2000,
-        response_format={"type": "json_object"}
-    )
+    for regen_attempt in range(2):
+        try:
+            response = client.chat.completions.create(
+                model=cfg.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=2000,
+                response_format={"type": "json_object"}
+            )
+            break
+        except APIStatusError as exc:
+            if exc.status_code >= 500 and regen_attempt == 0:
+                time.sleep(3)
+                continue
+            raise RuntimeError(
+                f"The AI service is temporarily unavailable (HTTP {exc.status_code}). "
+                "Please try again in a moment."
+            ) from exc
 
     raw = response.choices[0].message.content.strip()
     ctx_data = json.loads(_clean_json(raw))

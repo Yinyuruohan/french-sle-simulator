@@ -27,7 +27,7 @@ Scoring compares user answers to the pre-generated answer key. Pre-generated exp
 - **Warning:** All AI-judgment categories — `wrong_answer_key`, `multiple_correct`, `no_real_error`, `passage_grammar_error`, `weak_distractor`, `topic_mismatch`, `incorrect_rule`, `wrong_reasoning`, `misleading_explanation`, `hallucinated_rule`, `inconsistent_with_question`
 
 ### D5: New `warned` status for soft quarantine
-Contexts with warning flags cache as `warned` instead of `reviewed`. Both upgrade to `battle_tested` after a successful exam cycle. If a `warned` context also gets user-flagged (`user_flags >= 1`), it is double-deprioritized in assembly — the SQL ORDER BY applies both the user_flags penalty and the `warned` status penalty independently.
+Contexts with warning flags cache as `warned` instead of `reviewed`. Only `reviewed` contexts upgrade to `battle_tested` after a successful exam cycle — `warned` contexts remain `warned` permanently. If a `warned` context also gets user-flagged (`user_flags >= 1`), it is double-deprioritized in assembly — the SQL ORDER BY applies both the user_flags penalty and the `warned` status penalty independently.
 
 ### D6: Assembly prefers higher-quality contexts
 Order: unflagged `battle_tested` > unflagged `reviewed` > unflagged `warned` > user-flagged contexts.
@@ -75,7 +75,7 @@ Cached exam (battle_tested):
 
 ### `contexts` table changes
 
-`status` is already TEXT. `user_flags` is a new column — added to both the `CREATE TABLE` statement (for fresh installs) and via `ALTER TABLE` (for existing databases).
+`status` is already TEXT. `user_flags` is a new column — added to the `CREATE TABLE` statement. Existing databases with a schema mismatch are dropped and recreated (see Migration).
 
 ```sql
 context_id TEXT PRIMARY KEY,
@@ -129,7 +129,7 @@ Generation + Review:
 
 After exam usage (battle-testing):
   reviewed → battle_tested
-  warned   → battle_tested
+  warned   → warned (stays permanently)
 ```
 
 ## Module Interface Changes
@@ -228,9 +228,9 @@ ORDER BY
 
 **`_build_exam_from_rows()`** — Row tuple expands from 6 fields `(context_id, type, passage, questions_json, num_questions, grammar_topics)` to 8 fields `(..., status, user_flags)`. All index references must be updated. Reads `status` from index 6 and passes it as `bank_status` field in each assembled context dict.
 
-**`upgrade_to_battle_tested()`** — Simplified. No longer attaches explanations (already present) — remove the explanation-presence check (`len(expls) != len(questions)` guard). Just flips status. The SQL WHERE clause must be updated from `status = 'reviewed'` to `status IN ('reviewed', 'warned')` to allow warned contexts to also be battle-tested.
+**`upgrade_to_battle_tested()`** — Simplified. No longer attaches explanations (already present) — remove the explanation-presence check (`len(expls) != len(questions)` guard). Just flips status. The SQL WHERE clause stays as `status = 'reviewed'` — only reviewed contexts upgrade to battle-tested. Warned contexts remain warned permanently.
 
-**New function: `flag_context()`** — Increments `user_flags` for a context matched by `bank_context_id` or `passage_hash`. Also logs the flag details (category, free-text) to `system_error_tracking.md` for visibility.
+**New function: `flag_context()`** — Increments `user_flags` for a context matched by `bank_context_id` or `passage_hash`. Also logs the flag category to `system_error_tracking.md` for visibility.
 
 ### `app.py`
 
@@ -240,7 +240,7 @@ ORDER BY
 
 **Exam screen:**
 - Info banner if exam contains warned contexts: "Some questions in this exam were flagged with minor quality warnings during generation. They may contain ambiguities."
-- Per-context "Flag quality issue" button shown for ALL contexts (not just warned ones), allowing users to flag issues on reviewed and battle-tested content too. Category dropdown + optional free-text. Category and free-text are logged to `system_error_tracking.md` via `flag_context()`. The `user_flags` integer counter in the DB tracks the count; the detailed feedback lives in the tracking file.
+- Each individual context gets its own "Flag quality issue" collapsible section (e.g., Streamlit expander) placed below the context's questions. Shown for ALL contexts regardless of status (reviewed, warned, battle-tested). Inside the expander: a category dropdown (options: "Wrong answer key", "Multiple correct answers", "Unclear passage", "Bad explanation", "Other") + a "Submit flag" button. On submit, `flag_context()` increments `user_flags` for that specific context (matched by `bank_context_id` or `passage_hash`) and logs the category to `system_error_tracking.md`. Each context is flagged independently — flagging one context does not affect others in the same exam.
 
 **Results screen:**
 - Per-context caption for warned questions: "This question was flagged during quality review (warning)"
@@ -273,20 +273,19 @@ Failure — same as today. Message: "All generated contexts had critical quality
 The `user_flags` counter increments. The context keeps its `battle_tested` status but gets deprioritized in assembly. It's not removed from the cache.
 
 ### Existing database with old data
-Old contexts without `user_flags` column get default 0 via `ALTER TABLE ADD COLUMN`. Old contexts with `explanation: null` in `questions_json` continue to work — the results page already handles null explanations gracefully.
+If the schema changes (new columns, structural changes), drop the old database and create a new one. The user can rebuild the cache via pre-fill.
 
 ### Session crash before battle-testing
-If the user completes an exam but the browser/session crashes before `upgrade_to_battle_tested()` runs, the context stays at `reviewed` or `warned` (with `times_served` already incremented). No reconciliation is needed — the context simply remains at its current status until the next successful exam cycle upgrades it.
+If the user completes an exam but the browser/session crashes before `upgrade_to_battle_tested()` runs, the context stays at `reviewed` (with `times_served` already incremented). No reconciliation is needed — the context simply remains at its current status until the next successful exam cycle upgrades it. Warned contexts are unaffected since they never upgrade.
 
 ### Critical issues trigger regeneration
 When deterministic checks (`duplicate_options`, `structural_mismatch`) flag contexts as critical during fresh exam generation or pre-fill, the existing `regenerate_context()` flow is preserved: affected contexts are regenerated (max 1 retry per context). With only deterministic checks being critical, this path is rare but still supported.
 
 ### Cached exam from before this change (no explanations)
-Old `reviewed` contexts with `explanation: null` in `questions_json` are legacy data. When served, the results page shows the score without explanations (it already handles null explanations gracefully). These contexts can still be battle-tested — `upgrade_to_battle_tested()` just flips status. Over time, users can delete and rebuild the cache via the existing "delete bank" button, which replaces old data with new contexts that include explanations. No automatic backfill or legacy fallback code is needed.
+Not applicable — existing databases with old schema are dropped and recreated (see Migration). Users rebuild the cache via pre-fill.
 
 ## Migration
 
 1. Update `CREATE TABLE` in `init_db()` to include `user_flags INTEGER NOT NULL DEFAULT 0` — ensures fresh installs get the column automatically
-2. For existing databases: `ALTER TABLE contexts ADD COLUMN user_flags INTEGER NOT NULL DEFAULT 0` — run in `init_db()`, safe to run multiple times (check if column exists first via `PRAGMA table_info(contexts)`)
-3. No data migration needed — existing contexts keep their current status and null explanations
-4. Users who want explanations on old cached contexts can delete and re-fill the bank
+2. For existing databases: detect schema mismatch (e.g., missing `user_flags` column via `PRAGMA table_info(contexts)`), drop the database file, and recreate from scratch
+3. Users rebuild the cache via pre-fill after the database is recreated

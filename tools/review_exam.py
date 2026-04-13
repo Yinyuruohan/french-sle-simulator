@@ -17,9 +17,10 @@ import json
 import os
 import re
 import sys
+import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
-from openai import OpenAI
+from openai import OpenAI, APIStatusError
 from tools.model_config import ModelConfig, load_default_configs
 
 REVIEW_TEMPERATURE = 0.1
@@ -33,16 +34,27 @@ def _call_review_api(system_prompt: str, user_prompt: str, model_config: ModelCo
     """Make a review API call with low temperature for strict, consistent judgments."""
     client = OpenAI(api_key=model_config.api_key, base_url=model_config.base_url)
 
-    response = client.chat.completions.create(
-        model=model_config.model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=REVIEW_TEMPERATURE,
-        max_tokens=REVIEW_MAX_TOKENS,
-        response_format={"type": "json_object"}
-    )
+    for attempt in range(2):
+        try:
+            response = client.chat.completions.create(
+                model=model_config.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=REVIEW_TEMPERATURE,
+                max_tokens=REVIEW_MAX_TOKENS,
+                response_format={"type": "json_object"}
+            )
+            break
+        except APIStatusError as exc:
+            if exc.status_code >= 500 and attempt == 0:
+                time.sleep(3)
+                continue
+            raise RuntimeError(
+                f"The AI service is temporarily unavailable (HTTP {exc.status_code}). "
+                "Please try again in a moment."
+            ) from exc
 
     raw = response.choices[0].message.content.strip()
     # Strip markdown fences and trailing commas from AI output
