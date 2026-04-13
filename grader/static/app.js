@@ -295,7 +295,7 @@
                 <button class="rating-btn ${rating === "Bad" ? "selected-bad" : ""}" data-rating="Bad">Bad</button>
               </div>
               <div class="meta-label">Critique</div>
-              <textarea class="critique-textarea" id="critique" placeholder="Optional — add notes about this context...">${critique}</textarea>
+              <textarea class="critique-textarea" id="critique" placeholder="Optional — add notes about this context...">${esc(critique)}</textarea>
               <div style="text-align:right;">
                 <button class="btn-primary" id="btn-submit">${review ? "Update Review" : "Submit Review"}</button>
               </div>
