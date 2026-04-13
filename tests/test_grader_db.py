@@ -16,9 +16,12 @@ def db_path(tmp_path):
     path = str(tmp_path / "test_grader.db")
     import tools.question_bank as qb
     import tools.grader_db as gdb
+    old_qb, old_gdb = qb.DB_PATH, gdb.DB_PATH
     qb.DB_PATH = path
     gdb.DB_PATH = path
     yield path
+    qb.DB_PATH = old_qb
+    gdb.DB_PATH = old_gdb
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -216,12 +219,12 @@ def test_get_contexts_for_review_filter_reviewed(db_path):
     init_reviews_table()
 
     # Save a review for the first context
-    save_review(context_ids[0], "good", "Looks fine.")
+    save_review(context_ids[0], "Good", "Looks fine.")
 
     reviewed = get_contexts_for_review({"reviewed": "true"})
     assert reviewed["total"] == 1
     assert reviewed["items"][0]["context_id"] == context_ids[0]
-    assert reviewed["items"][0]["expert_rating"] == "good"
+    assert reviewed["items"][0]["expert_rating"] == "Good"
 
     unreviewed = get_contexts_for_review({"reviewed": "false"})
     assert unreviewed["total"] == 2
@@ -238,7 +241,7 @@ def test_get_contexts_for_review_combined_filters(db_path):
     init_reviews_table()
 
     # context_ids[0]: reviewed=True, flagged=True, status=reviewed
-    save_review(context_ids[0], "good", None)
+    save_review(context_ids[0], "Good", None)
     conn = sqlite3.connect(db_path)
     conn.execute(
         "UPDATE contexts SET user_flags = 1 WHERE context_id = ?", (context_ids[0],)
@@ -246,7 +249,7 @@ def test_get_contexts_for_review_combined_filters(db_path):
     # context_ids[1]: reviewed=True, flagged=False, status=reviewed
     conn.commit()
     conn.close()
-    save_review(context_ids[1], "bad", "Issues found.")
+    save_review(context_ids[1], "Bad", "Issues found.")
 
     # Filter: reviewed=true AND flagged=true
     result = get_contexts_for_review({"reviewed": "true", "flagged": "true"})
@@ -281,12 +284,12 @@ def test_get_review_returns_existing_review(db_path):
     context_ids = _seed_contexts(db_path, 1)
     init_reviews_table()
 
-    save_review(context_ids[0], "excellent", "Very clear questions.")
+    save_review(context_ids[0], "Good", "Very clear questions.")
 
     review = get_review(context_ids[0])
     assert review is not None
     assert review["context_id"] == context_ids[0]
-    assert review["expert_rating"] == "excellent"
+    assert review["expert_rating"] == "Good"
     assert review["expert_critique"] == "Very clear questions."
     assert review["model_output"] is not None  # snapshot was stored
     assert review["created_at"] is not None
@@ -300,7 +303,7 @@ def test_save_review_creates_snapshot_on_first_save(db_path):
     context_ids = _seed_contexts(db_path, 1)
     init_reviews_table()
 
-    result = save_review(context_ids[0], "good", "OK")
+    result = save_review(context_ids[0], "Good", "OK")
     assert result is not None
     assert "updated_at" in result
 
@@ -323,14 +326,14 @@ def test_save_review_updates_existing_review(db_path):
     context_ids = _seed_contexts(db_path, 1)
     init_reviews_table()
 
-    first_result = save_review(context_ids[0], "good", "Initial critique.")
+    first_result = save_review(context_ids[0], "Good", "Initial critique.")
     assert first_result is not None
 
-    second_result = save_review(context_ids[0], "bad", "Updated critique.")
+    second_result = save_review(context_ids[0], "Bad", "Updated critique.")
     assert second_result is not None
 
     review = get_review(context_ids[0])
-    assert review["expert_rating"] == "bad"
+    assert review["expert_rating"] == "Bad"
     assert review["expert_critique"] == "Updated critique."
     assert review["updated_at"] is not None
 
@@ -350,11 +353,11 @@ def test_save_review_without_critique(db_path):
     context_ids = _seed_contexts(db_path, 1)
     init_reviews_table()
 
-    result = save_review(context_ids[0], "acceptable", None)
+    result = save_review(context_ids[0], "Good", None)
     assert result is not None
 
     review = get_review(context_ids[0])
-    assert review["expert_rating"] == "acceptable"
+    assert review["expert_rating"] == "Good"
     assert review["expert_critique"] is None
 
 
@@ -365,7 +368,7 @@ def test_save_review_returns_none_for_missing_context(db_path):
     _seed_contexts(db_path, 0)
     init_reviews_table()
 
-    result = save_review("does-not-exist", "good", "critique")
+    result = save_review("does-not-exist", "Good", "critique")
     assert result is None
 
 
@@ -378,7 +381,7 @@ def test_is_snapshot_outdated_returns_false_when_unchanged(db_path):
     context_ids = _seed_contexts(db_path, 1)
     init_reviews_table()
 
-    save_review(context_ids[0], "good", None)
+    save_review(context_ids[0], "Good", None)
 
     result = is_snapshot_outdated(context_ids[0])
     assert result is False
@@ -392,7 +395,7 @@ def test_is_snapshot_outdated_returns_true_when_passage_changed(db_path):
     init_reviews_table()
 
     # Save review (snapshot taken now)
-    save_review(context_ids[0], "good", None)
+    save_review(context_ids[0], "Good", None)
 
     # Mutate the passage in contexts table
     conn = sqlite3.connect(db_path)
@@ -436,7 +439,7 @@ def test_is_snapshot_outdated_returns_none_when_context_deleted(db_path):
     context_ids = _seed_contexts(db_path, 1)
     init_reviews_table()
 
-    save_review(context_ids[0], "good", None)
+    save_review(context_ids[0], "Good", None)
 
     # Delete the context from contexts table
     conn = sqlite3.connect(db_path)

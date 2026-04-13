@@ -114,7 +114,7 @@ def create_app():
         if expert_rating not in ("Good", "Bad"):
             return jsonify({"error": "expert_rating must be 'Good' or 'Bad'"}), 400
 
-        expert_critique = body.get("expert_critique", "")
+        expert_critique = body.get("expert_critique") or None
 
         result = save_review(context_id, expert_rating, expert_critique)
         if result is None:
@@ -135,4 +135,5 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     app = create_app()
-    app.run(debug=True, port=args.port)
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    app.run(debug=debug, port=args.port)

@@ -271,3 +271,64 @@ def test_put_review_404_unknown_context(client, db_path):
         json={"expert_rating": "Good", "expert_critique": ""},
     )
     assert response.status_code == 404
+
+
+def test_get_context_detail_snapshot_outdated(client, db_path):
+    """GET /api/contexts/<id> returns snapshot_outdated=true after context is regenerated."""
+    context_ids = _seed_contexts(db_path, 1)
+    cid = context_ids[0]
+
+    # Submit review — snapshot is taken at this point
+    client.put(
+        f"/api/contexts/{cid}/review",
+        json={"expert_rating": "Good", "expert_critique": ""},
+    )
+
+    # Mutate the passage to simulate regeneration
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE contexts SET passage = 'Completely different passage after regeneration.' WHERE context_id = ?",
+        (cid,),
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get(f"/api/contexts/{cid}")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["review"] is not None
+    assert data["review"]["snapshot_outdated"] is True
+
+
+def test_get_contexts_combined_filters(client, db_path):
+    """GET /api/contexts?reviewed=true&flagged=true returns only matching contexts."""
+    context_ids = _seed_contexts(db_path, 3)
+
+    # Review context 0 and flag it
+    client.put(
+        f"/api/contexts/{context_ids[0]}/review",
+        json={"expert_rating": "Good", "expert_critique": ""},
+    )
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE contexts SET user_flags = 1 WHERE context_id = ?", (context_ids[0],)
+    )
+    # Review context 1 but don't flag it
+    conn.commit()
+    conn.close()
+    client.put(
+        f"/api/contexts/{context_ids[1]}/review",
+        json={"expert_rating": "Bad", "expert_critique": "Issues"},
+    )
+
+    response = client.get("/api/contexts?reviewed=true&flagged=true")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["total"] == 1
+    assert data["items"][0]["context_id"] == context_ids[0]
+
+    # reviewed=false AND flagged=false should return only context 2
+    response2 = client.get("/api/contexts?reviewed=false&flagged=false")
+    data2 = response2.get_json()
+    assert data2["total"] == 1
+    assert data2["items"][0]["context_id"] == context_ids[2]

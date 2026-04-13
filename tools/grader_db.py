@@ -178,7 +178,11 @@ def save_review(context_id: str, expert_rating: str, expert_critique: str | None
     If review is new: create a snapshot of the context and INSERT.
 
     Returns {"updated_at": <iso string>} or None if context not found in contexts table.
+    Raises ValueError if expert_rating is not 'Good' or 'Bad'.
     """
+    if expert_rating not in ("Good", "Bad"):
+        raise ValueError(f"expert_rating must be 'Good' or 'Bad', got {expert_rating!r}")
+
     now = datetime.now().isoformat()
 
     conn = _get_conn()
@@ -259,11 +263,16 @@ def is_snapshot_outdated(context_id: str) -> bool | None:
         if context_row is None:
             return None
 
+        # Materialize row data before closing the connection
+        snapshot_json = review_row["model_output"]
+        current_passage = context_row["passage"]
+        current_questions_json = context_row["questions_json"]
+        current_grammar_topics = context_row["grammar_topics"]
     finally:
         conn.close()
 
     # Parse snapshot from stored model_output JSON
-    snapshot = json.loads(review_row["model_output"])
+    snapshot = json.loads(snapshot_json)
     snapshot_hash = _context_data_hash({
         "passage": snapshot["passage"],
         "questions": snapshot["questions"],
@@ -272,9 +281,9 @@ def is_snapshot_outdated(context_id: str) -> bool | None:
 
     # Compute current context hash
     current_data = {
-        "passage": context_row["passage"],
-        "questions": json.loads(context_row["questions_json"]),
-        "grammar_topics": context_row["grammar_topics"],
+        "passage": current_passage,
+        "questions": json.loads(current_questions_json),
+        "grammar_topics": current_grammar_topics,
     }
     current_hash = _context_data_hash(current_data)
 

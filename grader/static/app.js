@@ -33,12 +33,23 @@
     return qs ? `?${qs}` : "";
   }
 
+  // ── HTML escaping ──────────────────────────────────────────────────────
+  function esc(str) {
+    return String(str ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
   // ── Toast ──────────────────────────────────────────────────────────────
+  let _toastTimer = null;
   function showToast(msg, type = "success") {
     const el = document.getElementById("toast");
     el.textContent = msg;
     el.className = `toast ${type}`;
-    setTimeout(() => el.classList.add("hidden"), 2500);
+    if (_toastTimer) clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => el.classList.add("hidden"), 2500);
   }
 
   // ── Router ─────────────────────────────────────────────────────────────
@@ -127,7 +138,7 @@
           <td><span class="badge badge-${item.status}">${item.status.replace("_", " ")}</span></td>
           <td>${item.user_flags > 0 ? `<span class="flags-red">${item.user_flags}</span>` : "0"}</td>
           <td>${item.expert_rating
-            ? `<span class="badge badge-${item.expert_rating.toLowerCase()}">${item.expert_rating}</span>`
+            ? `<span class="badge badge-${esc(item.expert_rating.toLowerCase())}">${esc(item.expert_rating)}</span>`
             : `<span class="badge-none">not reviewed</span>`}</td>
         `;
         tr.addEventListener("click", () => {
@@ -136,7 +147,7 @@
         tbody.appendChild(tr);
       }
     } catch (err) {
-      main.innerHTML = `<p style="color:#dc2626">Error loading contexts: ${err.message}</p>`;
+      main.innerHTML = `<p style="color:#dc2626">Error loading contexts: ${esc(err.message)}</p>`;
     }
   }
 
@@ -152,7 +163,7 @@
         const data = await api("/contexts");
         state.contextList = data.items;
       } catch (err) {
-        main.innerHTML = `<p style="color:#dc2626">Error: ${err.message}</p>`;
+        main.innerHTML = `<p style="color:#dc2626">Error: ${esc(err.message)}</p>`;
         return;
       }
     }
@@ -161,6 +172,17 @@
       const detail = await api(`/contexts/${contextId}`);
       const idx = state.contextList.findIndex((c) => c.context_id === contextId);
       const total = state.contextList.length;
+
+      // Guard: context not in the current filtered list (e.g. bookmarked URL with active filters)
+      if (idx === -1) {
+        const prevId = total > 0 ? state.contextList[total - 1].context_id : null;
+        const nextId = total > 0 ? state.contextList[0].context_id : null;
+        main.innerHTML = buildDetailHTML(detail, -1, total, prevId, nextId);
+        bindDetailEvents(detail, prevId, nextId);
+        renderSidebar(contextId);
+        return;
+      }
+
       const prevId = idx > 0 ? state.contextList[idx - 1].context_id : null;
       const nextId = idx < total - 1 ? state.contextList[idx + 1].context_id : null;
 
@@ -168,7 +190,7 @@
       bindDetailEvents(detail, prevId, nextId);
       renderSidebar(contextId);
     } catch (err) {
-      main.innerHTML = `<p style="color:#dc2626">Error: ${err.message}</p>`;
+      main.innerHTML = `<p style="color:#dc2626">Error: ${esc(err.message)}</p>`;
     }
   }
 
@@ -178,6 +200,7 @@
     const rating = review ? review.expert_rating : null;
     const critique = review ? review.expert_critique || "" : "";
     const outdated = review && review.snapshot_outdated;
+    const counterText = idx === -1 ? `(not in filtered list)` : `${idx + 1} of ${total}`;
 
     let questionsHTML = "";
     for (let i = 0; i < ctx.questions.length; i++) {
@@ -187,8 +210,8 @@
         const isCorrect = letter === q.correct_answer;
         optionsHTML += `
           <div class="${isCorrect ? "option-correct" : ""}">
-            <span class="option-label">${letter}.</span>
-            <span class="option-text">${text}${isCorrect ? " \u2713" : ""}</span>
+            <span class="option-label">${esc(letter)}.</span>
+            <span class="option-text">${esc(text)}${isCorrect ? " \u2713" : ""}</span>
           </div>`;
       }
 
@@ -197,9 +220,9 @@
           <div class="card-header">Question (${i + 1})</div>
           <div class="card-body">
             <div class="options-grid">${optionsHTML}</div>
-            <div style="border-top:1px solid #e2e8f0;padding-top:12px;">
+            <div class="question-grammar-section">
               <div class="meta-label">Grammar Topic</div>
-              <div class="meta-value">${q.grammar_topic}</div>
+              <div class="meta-value">${esc(q.grammar_topic)}</div>
             </div>
           </div>
         </div>`;
@@ -209,13 +232,13 @@
           <div class="card">
             <div class="card-header">Explanation</div>
             <div class="card-body">
-              <div style="margin-bottom:10px;">
+              <div class="explanation-why">
                 <div class="meta-label">Why Correct</div>
-                <div class="meta-value">${q.explanation.why_correct || ""}</div>
+                <div class="meta-value">${esc(q.explanation.why_correct || "")}</div>
               </div>
               <div>
                 <div class="meta-label">Grammar Rule</div>
-                <div class="meta-value">${q.explanation.grammar_rule || ""}</div>
+                <div class="meta-value">${esc(q.explanation.grammar_rule || "")}</div>
               </div>
             </div>
           </div>`;
@@ -223,8 +246,8 @@
     }
 
     const llmSection = review && review.llm_evaluator_rating
-      ? `<div><div class="meta-label">Rating</div><div class="meta-value">${review.llm_evaluator_rating}</div></div>
-         <div><div class="meta-label">Critique</div><div class="meta-value">${review.llm_evaluator_critique}</div></div>`
+      ? `<div><div class="meta-label">Rating</div><div class="meta-value">${esc(review.llm_evaluator_rating)}</div></div>
+         <div><div class="meta-label">Critique</div><div class="meta-value">${esc(review.llm_evaluator_critique)}</div></div>`
       : `<div class="placeholder-text">Not yet evaluated</div>`;
 
     return `
@@ -232,7 +255,7 @@
 
       <div class="nav-bar">
         <button class="btn-nav" id="btn-prev" ${!prevId ? "disabled" : ""}>&#8592; Previous</button>
-        <span class="nav-counter">${idx + 1} of ${total}</span>
+        <span class="nav-counter">${counterText}</span>
         <button class="btn-nav" id="btn-next" ${!nextId ? "disabled" : ""}>Next &#8594;</button>
       </div>
 
@@ -244,9 +267,9 @@
 
         <div class="detail-content">
           <div class="card">
-            <div class="card-header">Context Passage &mdash; ${ctx.type.replace("_", " ")} &middot; ${ctx.grammar_topics}</div>
+            <div class="card-header">Context Passage &mdash; ${esc(ctx.type.replace("_", " "))} &middot; ${esc(ctx.grammar_topics)}</div>
             <div class="card-body">
-              <div class="passage">${ctx.passage}</div>
+              <div class="passage">${esc(ctx.passage)}</div>
             </div>
           </div>
           ${questionsHTML}
