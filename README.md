@@ -2,7 +2,7 @@
 
 An AI-powered practice tool for the Canadian federal Public Service Commission's **Second Language Evaluation (SLE) — Test of Written Expression**. Generates realistic exam questions, grades answers, and provides detailed French grammar feedback.
 
-Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compatible AI endpoint (default: DeepSeek) and Streamlit as the web UI.
+Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compatible AI endpoint (default: DeepSeek) and Streamlit as the web UI. Includes a standalone **LLM Grader** expert review interface for quality-assuring AI-generated content.
 
 ## Features
 
@@ -29,26 +29,35 @@ Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compa
 - **Simplified SLE level scoring** — C (>=90%), B (>=70%), A (>=50%), Below A (<50%)
 - **Persistent error tracking** — logs user mistakes across sessions in `user_error_tracking.md`
 - **System QA tracking** — logs all review-flagged issues to `system_error_tracking.md`
+- **LLM Grader** — standalone expert review interface for subject-matter experts to rate and annotate AI-generated exam content before it reaches learners
 
 ## Project Structure
 
 ```
 french_sle_simulator/
 ├── app.py                           # Streamlit entry point (4 stages: welcome -> setup -> exam -> results)
+├── grader/
+│   ├── app.py                       # Flask app: REST API + static SPA serving (port 5001)
+│   └── static/
+│       ├── index.html               # SPA entry point (hash-based routing: list + detail views)
+│       ├── style.css                # Grader styles (Plus Jakarta Sans, blue palette)
+│       └── app.js                   # Vanilla JS: API calls, view rendering, filter state
 ├── tools/
 │   ├── model_config.py              # ModelConfig dataclass + load_default_configs() — model settings
 │   ├── generate_exam.py             # AI API: generate exam questions + explanations + option shuffling
 │   ├── evaluate_exam.py             # Deterministic grading using pre-generated explanations
 │   ├── review_exam.py               # AI API: unified QA review of questions and explanations
-│   └── question_bank.py             # SQLite question bank: cache, assemble, prefill, flag
+│   ├── question_bank.py             # SQLite question bank: cache, assemble, prefill, flag
+│   └── grader_db.py                 # Reviews table: init, CRUD, filtered queries, staleness detection
 ├── tests/
 │   ├── test_model_config.py         # Tests for model_config.py (6 tests)
-│   ├── test_generate_exam.py        # Tests for generate_exam.py (6 tests)
-│   ├── test_evaluate_exam.py        # Tests for evaluate_exam.py (4 tests)
-│   ├── test_review_exam.py          # Tests for review_exam.py (5 tests)
-│   └── test_question_bank.py        # Tests for question_bank.py (28 tests)
+│   ├── test_generate_exam.py        # Tests for generate_exam.py (3 tests)
+│   ├── test_question_bank.py        # Tests for question_bank.py (17 tests)
+│   ├── test_grader_db.py            # Tests for grader_db.py (19 tests)
+│   └── test_grader_api.py           # Integration tests for grader Flask API (11 tests)
 ├── workflows/
-│   └── sle_exam_simulator.md        # SOP for the exam workflow
+│   ├── sle_exam_simulator.md        # SOP for the exam simulator workflow
+│   └── llm_grader.md               # SOP for the LLM Grader expert review workflow
 ├── contexts/
 │   └── fr-written-test-booklet-100919.pdf  # Official PSC test reference
 ├── .tmp/                            # Generated exams + feedback (disposable)
@@ -75,11 +84,17 @@ french_sle_simulator/
    # Edit .env and set DEEPSEEK_API_KEY (or any OpenAI-compatible key — see .env.template)
    ```
 
-3. **Run the app:**
+3. **Run the exam simulator:**
    ```bash
    streamlit run app.py
    ```
    Open **http://localhost:8501** in your browser.
+
+4. **Run the LLM Grader** (optional — for expert content review):
+   ```bash
+   python grader/app.py
+   ```
+   Open **http://localhost:5001** in your browser.
 
 ## How It Works
 
@@ -116,14 +131,40 @@ Every generated exam passes through a multi-layer quality check:
 4. **Status tracking** — clean contexts cached as `reviewed`, contexts with warnings cached as `warned`
 5. **Error logging** — all flagged issues are logged to `system_error_tracking.md` for monitoring
 
+## LLM Grader
+
+A standalone expert review interface that lets subject-matter experts rate and annotate AI-generated exam contexts before they reach learners.
+
+```bash
+python grader/app.py           # default port 5001
+GRADER_PORT=5002 python grader/app.py   # override via env var
+python grader/app.py --port 5002        # override via CLI flag
+```
+
+**Architecture:** Flask backend with `create_app()` factory, REST API under `/api/*`, vanilla JS SPA frontend served at `/`. Shares `question_bank.db` with the Streamlit simulator; writes only to the `reviews` table.
+
+**Workflow:**
+1. **List view** — filterable table of all contexts (filter by status, user flags, review state)
+2. **Detail view** — three-column layout: scrollable sidebar navigator, exam content with correct answers highlighted, review panel with Good/Bad rating + free-text critique
+3. **Review submission** — first submission snapshots the context (SHA-256 tracked); subsequent submissions update rating and critique without overwriting the snapshot
+4. **Snapshot staleness** — if a context is regenerated after review, a "Snapshot outdated" banner appears in the detail view
+
+**API endpoints:**
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/contexts` | List contexts with optional filters (status, flagged, reviewed) |
+| GET | `/api/contexts/{id}` | Context detail + existing review + snapshot_outdated flag |
+| PUT | `/api/contexts/{id}/review` | Submit or update expert rating and critique |
+
 ## Tech Stack
 
 - **AI Engine:** Any OpenAI-compatible endpoint (default: DeepSeek `deepseek-chat`); configurable per tool
-- **Web UI:** Streamlit
-- **Database:** SQLite (question bank cache)
+- **Web UI:** Streamlit (exam simulator) + Flask + vanilla JS SPA (LLM Grader)
+- **Database:** SQLite (question bank + reviews)
 - **Framework:** WAT (Workflows, Agents, Tools)
 - **Language:** Python 3.10+
-- **Tests:** pytest (49 tests across 5 test modules)
+- **Tests:** pytest (56 tests across 5 test modules)
 
 ## Disclaimer
 

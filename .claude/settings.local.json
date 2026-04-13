@@ -9,7 +9,16 @@
       "Bash(python -m pytest tests/test_model_config.py -v)",
       "Bash(python -m pytest tests/test_generate_exam.py -v)",
       "Bash(python -m pytest tests/ -v)",
-      "Bash(python -c \"from tools.generate_exam import generate_exam, regenerate_context; print\\(''OK''\\)\")"
+      "Bash(python -c \"from tools.generate_exam import generate_exam, regenerate_context; print\\(''OK''\\)\")",
+      "Skill(code-review:code-review)",
+      "Skill(code-review:code-review:*)",
+      "Bash(python -m pytest tests/test_question_bank.py -v)",
+      "Bash(python -m pytest tests/test_question_bank.py -v -k \"cache\")",
+      "Bash(python -m pytest tests/test_grader_db.py -v)",
+      "Bash(python -m pytest tests/test_grader_api.py -v)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(python -m pytest tests/test_grader_api.py tests/test_grader_db.py -v)",
+      "Bash(python -c \"from tools.question_bank import init_db, get_bank_stats; init_db\\(\\); print\\(get_bank_stats\\(\\)\\)\")"
     ]
   }
 }

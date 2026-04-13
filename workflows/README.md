@@ -1,12 +1,13 @@
 # Workflows Directory
 
-This directory contains **Standard Operating Procedures (SOPs)** written in Markdown for the SLE exam simulator.
+This directory contains **Standard Operating Procedures (SOPs)** written in Markdown for the SLE exam simulator and LLM Grader.
 
 ## Available Workflows
 
 | Workflow | Description |
 |---|---|
-| `sle_exam_simulator.md` | Full SOP for the exam pipeline: generation, quality review, exam administration, evaluation, feedback review, and results display |
+| `sle_exam_simulator.md` | Full SOP for the exam pipeline: generation, quality review, exam administration, evaluation, and results display |
+| `llm_grader.md` | SOP for the expert review interface: Flask startup, list/detail navigation, review submission, and snapshot staleness detection |
 
 ## What is a Workflow?
 
