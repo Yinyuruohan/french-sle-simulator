@@ -9,11 +9,13 @@ import argparse
 import json
 import os
 import sys
+from datetime import date
 
 # Make tools/ importable when running grader/app.py directly
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
+from grader.batch import export_to_excel, import_from_excel
 
 from tools.grader_db import (
     cleanup_empty_reviews,
@@ -121,6 +123,55 @@ def create_app():
             return jsonify({"error": "Context not found"}), 404
 
         return jsonify({"success": True, "updated_at": result["updated_at"]})
+
+    # ── GET /api/export ───────────────────────────────────────────────────────
+
+    @app.route("/api/export", methods=["GET"])
+    def export_excel():
+        """Export contexts matching active filters as a downloadable Excel file."""
+        filters = {}
+        status = request.args.get("status")
+        if status:
+            filters["status"] = status
+        flagged = request.args.get("flagged")
+        if flagged:
+            filters["flagged"] = flagged
+        reviewed = request.args.get("reviewed")
+        if reviewed:
+            filters["reviewed"] = reviewed
+
+        try:
+            file_bytes = export_to_excel(filters)
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+        filename = f"grader_export_{date.today().isoformat()}.xlsx"
+        return Response(
+            file_bytes,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+
+    # ── POST /api/import ──────────────────────────────────────────────────────
+
+    @app.route("/api/import", methods=["POST"])
+    def import_excel():
+        """Import expert reviews from an uploaded .xlsx file."""
+        if "file" not in request.files:
+            return jsonify({"error": "No file attached"}), 400
+
+        uploaded = request.files["file"]
+        if not uploaded.filename.lower().endswith(".xlsx"):
+            return jsonify({"error": "Invalid file format"}), 400
+
+        try:
+            result = import_from_excel(uploaded.read())
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+        return jsonify(result)
 
     return app
 

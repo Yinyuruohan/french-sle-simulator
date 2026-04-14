@@ -114,6 +114,13 @@
           </thead>
           <tbody id="ctx-tbody"></tbody>
         </table>
+
+        <div class="batch-actions">
+          <a id="btn-download" class="btn-download" href="#">&#8595; Download Excel</a>
+          <label class="btn-upload" for="upload-input">&#8593; Upload Excel</label>
+          <input type="file" id="upload-input" accept=".xlsx" style="display:none">
+          <span class="upload-status" id="upload-status"></span>
+        </div>
       `;
 
       // Set filter values
@@ -130,6 +137,55 @@
       setVal("f-status", "status");
       setVal("f-flagged", "flagged");
       setVal("f-reviewed", "reviewed");
+
+      // ── Download Excel ────────────────────────────────────────────────────
+      document.getElementById("btn-download").addEventListener("click", function () {
+        // Set href at click time so filters are always current
+        this.href = `/api/export${queryString(state.filters)}`;
+        // Allow browser default (follow link) to trigger the download
+      });
+
+      // ── Upload Excel ──────────────────────────────────────────────────────
+      document.getElementById("upload-input").addEventListener("change", async function () {
+        const file = this.files[0];
+        if (!file) return;
+
+        const statusEl = document.getElementById("upload-status");
+        statusEl.textContent = "Uploading\u2026";
+        statusEl.className = "upload-status";
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+          const resp = await fetch("/api/import", { method: "POST", body: formData });
+          const data = await resp.json();
+
+          if (!resp.ok) {
+            statusEl.innerHTML = `<span style="color:#dc2626">Error: ${esc(data.error)}</span>`;
+          } else {
+            const msg = `Imported ${data.imported}, skipped ${data.skipped}`;
+            showToast(msg, data.errors.length > 0 ? "error" : "success");
+
+            if (data.errors.length > 0) {
+              const items = data.errors
+                .map((e) => `<li>${esc(e.context_id)}: ${esc(e.reason)}</li>`)
+                .join("");
+              statusEl.innerHTML = `<div class="import-errors"><strong>Errors (${data.errors.length}):</strong><ul>${items}</ul></div>`;
+            } else {
+              statusEl.textContent = "";
+            }
+
+            // Reload list to reflect updated review statuses
+            renderListView();
+          }
+        } catch (err) {
+          statusEl.innerHTML = `<span style="color:#dc2626">Error: ${esc(err.message)}</span>`;
+        }
+
+        // Reset so the same file can be re-uploaded if needed
+        this.value = "";
+      });
 
       // Render context count
       const hasFilters = Object.keys(state.filters).some((k) => state.filters[k]);
