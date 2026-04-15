@@ -16,7 +16,7 @@ Generate realistic French SLE Written Expression practice exams, administer them
 | `tools/model_config.py` | `ModelConfig` dataclass + `load_default_configs()` — single source of truth for AI model settings |
 | `tools/generate_exam.py` | Generates exam questions via AI API |
 | `tools/review_exam.py` | Unified quality review of exam questions and explanations via AI API |
-| `tools/evaluate_exam.py` | Deterministic grading using pre-generated explanations, logs errors |
+| `tools/evaluate_exam.py` | Deterministic grading using pre-generated explanations, logs errors — **no API call** |
 | `tools/question_bank.py` | Caches validated contexts in SQLite; assembles instant exams from cache; user flagging |
 
 ## How to Run
@@ -30,7 +30,8 @@ Then open the URL shown in the terminal (typically `http://localhost:8501`).
 
 **Model configuration** (`.env`):
 - `DEEPSEEK_API_KEY` — used by all three tools as the default key (with `base_url=https://api.deepseek.com`, model `deepseek-chat`)
-- Optional per-tool overrides: `GENERATE_API_KEY/BASE_URL/MODEL`, `EVALUATE_API_KEY/BASE_URL/MODEL`, `REVIEW_API_KEY/BASE_URL/MODEL`
+- Optional per-tool overrides: `GENERATE_API_KEY/BASE_URL/MODEL`, `REVIEW_API_KEY/BASE_URL/MODEL`
+- Note: `EVALUATE_*` env vars are defined in `model_config.py` but have no effect — `evaluate_exam.py` makes no API call
 - Any OpenAI-compatible endpoint is supported (e.g. Gemini, OpenAI, local Ollama)
 - Per-session overrides are also available via the "AI model settings (optional)" expander on the setup screen
 
