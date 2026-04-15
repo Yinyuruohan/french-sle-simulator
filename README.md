@@ -30,6 +30,7 @@ Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compa
 - **Persistent error tracking** — logs user mistakes across sessions in `user_error_tracking.md`
 - **System QA tracking** — logs all review-flagged issues to `system_error_tracking.md`
 - **LLM Grader** — standalone expert review interface for subject-matter experts to rate and annotate AI-generated exam content before it reaches learners
+- **Batch Excel export/import** — download the current filtered view as `.xlsx`, edit ratings in Excel (with Good/Bad dropdown), and upload back to bulk-update reviews
 
 ## Project Structure
 
@@ -38,6 +39,7 @@ french_sle_simulator/
 ├── app.py                           # Streamlit entry point (4 stages: welcome -> setup -> exam -> results)
 ├── grader/
 │   ├── app.py                       # Flask app: REST API + static SPA serving (port 5001)
+│   ├── batch.py                     # Batch Excel export/import: export_to_excel(), import_from_excel()
 │   └── static/
 │       ├── index.html               # SPA entry point (hash-based routing: list + detail views)
 │       ├── style.css                # Grader styles (Plus Jakarta Sans, blue palette)
@@ -54,7 +56,8 @@ french_sle_simulator/
 │   ├── test_generate_exam.py        # Tests for generate_exam.py (3 tests)
 │   ├── test_question_bank.py        # Tests for question_bank.py (17 tests)
 │   ├── test_grader_db.py            # Tests for grader_db.py (19 tests)
-│   └── test_grader_api.py           # Integration tests for grader Flask API (11 tests)
+│   ├── test_grader_api.py           # Integration tests for grader Flask API (11 tests)
+│   └── test_grader_batch.py         # Unit + integration tests for batch export/import (28 tests)
 ├── workflows/
 │   ├── sle_exam_simulator.md        # SOP for the exam simulator workflow
 │   └── llm_grader.md               # SOP for the LLM Grader expert review workflow
@@ -156,6 +159,8 @@ python grader/app.py --port 5002        # override via CLI flag
 | GET | `/api/contexts` | List contexts with optional filters (status, flagged, reviewed) |
 | GET | `/api/contexts/{id}` | Context detail + existing review + snapshot_outdated flag |
 | PUT | `/api/contexts/{id}/review` | Submit or update expert rating and critique |
+| GET | `/api/export` | Download filtered contexts as `.xlsx` for batch review |
+| POST | `/api/import` | Upload reviewed `.xlsx` to bulk-save expert ratings |
 
 ## Tech Stack
 
@@ -164,7 +169,7 @@ python grader/app.py --port 5002        # override via CLI flag
 - **Database:** SQLite (question bank + reviews)
 - **Framework:** WAT (Workflows, Agents, Tools)
 - **Language:** Python 3.10+
-- **Tests:** pytest (56 tests across 5 test modules)
+- **Tests:** pytest (84 tests across 6 test modules)
 
 ## Disclaimer
 
