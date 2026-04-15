@@ -17,7 +17,7 @@ Python scripts that make API calls, process data, and execute specific tasks for
 
 ### model_config.py
 - `ModelConfig` — dataclass: `base_url`, `api_key`, `model`, `temperature`, `max_tokens`
-- `load_default_configs()` — returns per-tool configs resolved from env vars (`GENERATE_*`, `EVALUATE_*`, `REVIEW_*`) with DeepSeek defaults
+- `load_default_configs()` — returns per-tool configs resolved from env vars (`GENERATE_*`, `REVIEW_*`) with DeepSeek defaults. `EVALUATE_*` vars are parsed but unused — `evaluate_exam.py` makes no API call.
 
 ### generate_exam.py
 - `generate_exam(num_questions, model_config)` — generate a full exam (2–20 questions) with questions and explanations in one API call
@@ -52,7 +52,7 @@ Python scripts that make API calls, process data, and execute specific tasks for
 
 ## Conventions
 
-- All tools load credentials from `.env` via `python-dotenv`
+- Tools that make API calls (`generate_exam.py`, `review_exam.py`) load credentials from `.env` via `python-dotenv`; `evaluate_exam.py` requires no credentials
 - AI API accessed via the `openai` SDK with a configurable `base_url` (default: DeepSeek `https://api.deepseek.com`)
 - JSON response format enforced on all generation and review API calls
 - Temperature by purpose: 0.7 (generation), 0.1 (review)
