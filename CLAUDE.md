@@ -11,7 +11,7 @@ This app generates realistic French SLE Written Expression exam questions via a 
 - `python grader/app.py` — launches the LLM Grader expert review interface (port 5001)
 - `tools/model_config.py` — `ModelConfig` dataclass + `load_default_configs()`; single source of truth for AI model settings
 - `tools/generate_exam.py` — generates exam questions (AI API)
-- `tools/evaluate_exam.py` — grades answers and generates feedback (AI API)
+- `tools/evaluate_exam.py` — grades answers and displays pre-generated feedback (no AI API)
 - `tools/review_exam.py` — validates exam quality and feedback accuracy (AI API)
 - `tools/question_bank.py` — SQLite question bank: cache validated contexts, assemble instant exams
 - `workflows/sle_exam_simulator.md` — full SOP for the exam workflow
@@ -30,6 +30,7 @@ This app generates realistic French SLE Written Expression exam questions via a 
 app.py                    # Streamlit web UI (4 stages: welcome → setup → exam → results)
 grader/
   app.py                  # Flask app: REST API + static file serving for expert review
+  batch.py                # Batch Excel export/import: export_to_excel(), import_from_excel()
   static/
     index.html            # SPA entry point (list + detail views, hash-based routing)
     style.css             # Grader styles (Plus Jakarta Sans, blue palette)
@@ -37,7 +38,7 @@ grader/
 tools/
   model_config.py         # ModelConfig dataclass + load_default_configs(); per-tool AI model settings
   generate_exam.py        # AI API call to generate contexts→questions with A/B/C/D
-  evaluate_exam.py        # Grade answers, generate explanations, save feedback, track errors
+  evaluate_exam.py        # Grade answers deterministically, display pre-generated feedback (no AI API)
   review_exam.py          # Conservative QA review of exam questions and feedback explanations
   question_bank.py        # SQLite question bank: cache, assemble, prefill
   grader_db.py            # Reviews table: init, CRUD, filtered queries, staleness detection
@@ -47,6 +48,7 @@ tests/
   test_question_bank.py   # Unit tests for question_bank.py (17 tests)
   test_grader_db.py       # Unit tests for grader_db.py (19 tests)
   test_grader_api.py      # Integration tests for grader Flask API (11 tests)
+  test_grader_batch.py    # Unit + integration tests for batch export/import (28 tests)
 workflows/
   sle_exam_simulator.md   # Full SOP for the exam workflow
 contexts/
@@ -57,7 +59,7 @@ system_error_tracking.md  # Persistent: review-flagged issues across sessions (s
 question_bank.db          # Persistent: SQLite question bank cache (gitignored, can be deleted and rebuilt)
 .env                      # API keys (never commit); DEEPSEEK_API_KEY + optional per-tool overrides
 .env.template             # Template for .env
-requirements.txt          # python-dotenv, requests, openai, streamlit
+requirements.txt          # python-dotenv, requests, openai, streamlit, flask, openpyxl
 ```
 
 ## Exam Data Structure

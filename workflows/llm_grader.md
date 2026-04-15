@@ -14,6 +14,7 @@ Provide subject-matter experts with a web interface to review AI-generated exam 
 | Tool | Purpose |
 |---|---|
 | `grader/app.py` | Flask application: REST API endpoints + static SPA serving |
+| `grader/batch.py` | Batch Excel export (`export_to_excel`) and import (`import_from_excel`) |
 | `tools/grader_db.py` | Reviews table: init, CRUD, filtered queries, snapshot staleness detection |
 | `tools/question_bank.py` | Read-only access to contexts table for live data |
 
@@ -33,10 +34,11 @@ Then open `http://localhost:5001` in a browser.
 ## Architecture
 
 - Flask backend with `create_app()` factory pattern
-- REST API under `/api/*` — 3 endpoints
+- REST API under `/api/*` — 5 endpoints (list, detail, review, export, import)
 - Static SPA frontend served at `/` (vanilla HTML/CSS/JS, no build step)
 - Shares `question_bank.db` with the Streamlit simulator
 - Writes only to the `reviews` table; never modifies the `contexts` table
+- Batch module (`grader/batch.py`) handles Excel formatting via `openpyxl`; `COLUMNS` list is the single source of truth for column schema
 
 ## Workflow Steps
 
@@ -57,6 +59,19 @@ Then open `http://localhost:5001` in a browser.
    - Toast notification confirms success or shows error
 5. **Navigation** — Previous/Next buttons + sidebar clicks allow moving through contexts without returning to list view. All navigation respects active filters.
 6. **Snapshot staleness** — If a context is regenerated after its review snapshot was taken, the detail view displays a "Snapshot outdated" banner. Detection uses SHA-256 hash comparison of passage + questions + grammar_topics.
+7. **Batch export** — Expert clicks "↓ Download Excel" in the list view:
+   - Active filters are forwarded to `GET /api/export` as query parameters
+   - `export_to_excel()` builds one row per question; context-level fields repeat across rows
+   - Editable cells (`expert_rating`, `expert_critique`) are yellow and unlocked on the first row of each context; all other cells are grey and locked
+   - `expert_rating` column has a dropdown constraint: only "Good" and "Bad" are accepted
+   - File is named `grader_export_YYYY-MM-DD.xlsx`
+8. **Batch import** — Expert clicks "↑ Upload Excel" and selects a filled-in file:
+   - File is posted to `POST /api/import`
+   - `import_from_excel()` reads the first row of each contiguous context block; subsequent question rows are skipped
+   - Blank ratings are skipped (counted as `skipped`); invalid ratings are collected as errors
+   - Successfully parsed rows call `save_review()` — same path as single-context review submission
+   - List view refreshes automatically; a toast shows imported/skipped/error counts
+   - Detailed per-context errors appear inline below the upload button
 
 ## Data Model
 
@@ -83,6 +98,8 @@ No foreign key constraint — reviews must outlive deleted/regenerated contexts 
 | GET | `/api/contexts` | List contexts with optional filters (status, flagged, reviewed) |
 | GET | `/api/contexts/{id}` | Context detail + existing review + snapshot_outdated flag |
 | PUT | `/api/contexts/{id}/review` | Submit or update expert rating and critique |
+| GET | `/api/export` | Download filtered contexts as `.xlsx` for batch review |
+| POST | `/api/import` | Upload reviewed `.xlsx` to bulk-save expert ratings |
 
 ## Edge Cases
 
@@ -93,6 +110,11 @@ No foreign key constraint — reviews must outlive deleted/regenerated contexts 
 - **Concurrent use** — Not supported; single-user assumed (SQLite + no auth)
 - **Deleted context** — Review persists with its snapshot; staleness check returns None (no banner shown)
 - **Filter persistence** — Active filters stored in `sessionStorage`, persist across navigation within the session
+- **Export with no results** — `GET /api/export` returns a header-only `.xlsx` (no data rows) when no contexts match the active filters; no error
+- **Import with invalid file** — Non-`.xlsx` files return 400; missing `context_id` or `expert_rating` columns return 400 with a descriptive message
+- **Import with reordered rows** — Rows are processed as contiguous blocks by `context_id`; if an expert re-sorts the file breaking contiguity, the second occurrence of a `context_id` is treated as a new block and its rating applied
+- **Import with unknown context_id** — Rows referencing a `context_id` not in the database are collected as errors and reported in the response; other rows are still processed
+- **Partial import** — Import always reports `{"imported": N, "skipped": M, "errors": [...]}` even if some rows fail; the caller sees exactly what succeeded
 
 ## Out of Scope
 
