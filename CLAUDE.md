@@ -30,6 +30,7 @@ This app generates realistic French SLE Written Expression exam questions via a 
 app.py                    # Streamlit web UI (4 stages: welcome → setup → exam → results)
 grader/
   app.py                  # Flask app: REST API + static file serving for expert review
+  batch.py                # Batch Excel export/import: export_to_excel(), import_from_excel()
   static/
     index.html            # SPA entry point (list + detail views, hash-based routing)
     style.css             # Grader styles (Plus Jakarta Sans, blue palette)
@@ -47,6 +48,7 @@ tests/
   test_question_bank.py   # Unit tests for question_bank.py (17 tests)
   test_grader_db.py       # Unit tests for grader_db.py (19 tests)
   test_grader_api.py      # Integration tests for grader Flask API (11 tests)
+  test_grader_batch.py    # Unit + integration tests for batch export/import (28 tests)
 workflows/
   sle_exam_simulator.md   # Full SOP for the exam workflow
 contexts/
@@ -57,7 +59,7 @@ system_error_tracking.md  # Persistent: review-flagged issues across sessions (s
 question_bank.db          # Persistent: SQLite question bank cache (gitignored, can be deleted and rebuilt)
 .env                      # API keys (never commit); DEEPSEEK_API_KEY + optional per-tool overrides
 .env.template             # Template for .env
-requirements.txt          # python-dotenv, requests, openai, streamlit
+requirements.txt          # python-dotenv, requests, openai, streamlit, flask, openpyxl
 ```
 
 ## Exam Data Structure
