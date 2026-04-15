@@ -7,7 +7,7 @@ This directory contains **Standard Operating Procedures (SOPs)** written in Mark
 | Workflow | Description |
 |---|---|
 | `sle_exam_simulator.md` | Full SOP for the exam pipeline: generation, quality review, exam administration, evaluation, and results display |
-| `llm_grader.md` | SOP for the expert review interface: Flask startup, list/detail navigation, review submission, and snapshot staleness detection |
+| `llm_grader.md` | SOP for the expert review interface: Flask startup, list/detail navigation, review submission, snapshot staleness detection, and batch Excel export/import |
 
 ## What is a Workflow?
 
