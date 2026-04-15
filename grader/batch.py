@@ -9,14 +9,12 @@ import io
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill, Protection
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 # Column schema — order determines column position in the Excel file
 COLUMNS = [
     "context_id",
     "passage",
-    "expert_rating",    # editable — first question row of each context only
-    "expert_critique",  # editable — first question row of each context only
-    "question_id",
     "correct_answer",
     "grammar_topic",
     "option_A",
@@ -25,6 +23,8 @@ COLUMNS = [
     "option_D",
     "why_correct",
     "grammar_rule",
+    "expert_rating",    # editable — first question row of each context only
+    "expert_critique",  # editable — first question row of each context only
 ]
 
 EDITABLE_COLS = {"expert_rating", "expert_critique"}
@@ -109,9 +109,6 @@ def export_to_excel(
             row_data = {
                 "context_id": context_id,
                 "passage": ctx_data.get("passage", ""),
-                "expert_rating": expert_rating if is_first else "",
-                "expert_critique": expert_critique if is_first else "",
-                "question_id": q.get("question_id", ""),
                 "correct_answer": q.get("correct_answer", ""),
                 "grammar_topic": q.get("grammar_topic", ""),
                 "option_A": opts.get("A", ""),
@@ -120,6 +117,8 @@ def export_to_excel(
                 "option_D": opts.get("D", ""),
                 "why_correct": expl.get("why_correct", ""),
                 "grammar_rule": expl.get("grammar_rule", ""),
+                "expert_rating": expert_rating if is_first else "",
+                "expert_critique": expert_critique if is_first else "",
             }
 
             for col_idx, col_name in enumerate(COLUMNS, start=1):
@@ -133,6 +132,18 @@ def export_to_excel(
                     cell.protection = Protection(locked=True)
 
             row_idx += 1
+
+    # ── Dropdown validation for expert_rating ──────────────────────────────
+    if row_idx > 2:
+        rating_col = get_column_letter(COLUMNS.index("expert_rating") + 1)
+        dv = DataValidation(
+            type="list",
+            formula1='"Good,Bad"',
+            allow_blank=True,
+            showDropDown=False,
+        )
+        dv.sqref = f"{rating_col}2:{rating_col}{row_idx - 1}"
+        ws.add_data_validation(dv)
 
     # Enable sheet protection — activates all cell-level locked=True settings
     ws.protection.sheet = True
