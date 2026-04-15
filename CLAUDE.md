@@ -11,7 +11,7 @@ This app generates realistic French SLE Written Expression exam questions via a 
 - `python grader/app.py` — launches the LLM Grader expert review interface (port 5001)
 - `tools/model_config.py` — `ModelConfig` dataclass + `load_default_configs()`; single source of truth for AI model settings
 - `tools/generate_exam.py` — generates exam questions (AI API)
-- `tools/evaluate_exam.py` — grades answers and generates feedback (AI API)
+- `tools/evaluate_exam.py` — grades answers and displays pre-generated feedback (no AI API)
 - `tools/review_exam.py` — validates exam quality and feedback accuracy (AI API)
 - `tools/question_bank.py` — SQLite question bank: cache validated contexts, assemble instant exams
 - `workflows/sle_exam_simulator.md` — full SOP for the exam workflow
@@ -38,7 +38,7 @@ grader/
 tools/
   model_config.py         # ModelConfig dataclass + load_default_configs(); per-tool AI model settings
   generate_exam.py        # AI API call to generate contexts→questions with A/B/C/D
-  evaluate_exam.py        # Grade answers, generate explanations, save feedback, track errors
+  evaluate_exam.py        # Grade answers deterministically, display pre-generated feedback (no AI API)
   review_exam.py          # Conservative QA review of exam questions and feedback explanations
   question_bank.py        # SQLite question bank: cache, assemble, prefill
   grader_db.py            # Reviews table: init, CRUD, filtered queries, staleness detection
