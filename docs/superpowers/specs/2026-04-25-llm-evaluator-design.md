@@ -31,22 +31,24 @@ def evaluate_context(context_data: dict, model_config: ModelConfig) -> dict:
 
 - Reads judge criteria from `LLM_judge_prompt.md` (project root)
 - Serializes context: passage, questions, options, correct answers, explanations
-- Calls LLM via OpenAI SDK at temperature 0.1
-- Parses response to extract rating and critique
-- Model config uses `EVALUATOR_*` env vars (`EVALUATOR_API_KEY`, `EVALUATOR_BASE_URL`, `EVALUATOR_MODEL`), falling back to DeepSeek defaults
+- Calls LLM via OpenAI SDK at temperature 0.1, `max_tokens=512`; no explicit request timeout (rely on OpenAI SDK default)
+- Parses response to extract rating and critique; if the response is malformed (no `Rating:` line or unrecognised value), raises `ValueError` — the endpoint catches this and returns HTTP 502
+- Model config uses `EVALUATOR_*` env vars (`EVALUATOR_API_KEY`, `EVALUATOR_BASE_URL`, `EVALUATOR_MODEL`), falling back to `deepseek-v4-pro` and `https://api.deepseek.com`
 
 ---
 
 ## Layer 2 — `tools/grader_db.py` (new function)
 
 ```python
-def save_llm_review(context_id: str, llm_rating: str, llm_critique: str) -> dict | None:
-    # Returns {"updated_at": "<iso>"} or None if context not found
+from typing import Optional
+
+def save_llm_review(context_id: str, llm_rating: str, llm_critique: str) -> Optional[dict]:
+    # Returns {"updated_at": "<iso>"} or None if context not found in contexts table
 ```
 
 Two cases:
 - **Row exists**: UPDATE `llm_evaluator_rating`, `llm_evaluator_critique`, `updated_at` only; all other fields untouched
-- **No row yet**: INSERT new row with context snapshot, `llm_evaluator_rating`, `llm_evaluator_critique`; `expert_rating` and `agreement` left NULL
+- **No row yet**: INSERT new row with context snapshot — columns: `context_id`, `passage`, `questions` (JSON), `status` (from contexts table), `llm_evaluator_rating`, `llm_evaluator_critique`; `expert_rating` and `agreement` left NULL
 
 `save_review()` is unchanged.
 
@@ -59,11 +61,11 @@ POST /api/contexts/<context_id>/llm-review
 ```
 
 1. `get_context_data(context_id)` → 404 if not found
-2. `evaluate_context(context_data, evaluator_model_config)`
-3. `save_llm_review(context_id, rating, critique)`
+2. `evaluate_context(context_data, evaluator_model_config)` → 502 if `ValueError` raised (malformed LLM response)
+3. `save_llm_review(context_id, rating, critique)` → 500 if returns `None` (should not happen after step 1 guard, but treated as internal error)
 4. Returns `{"rating": ..., "critique": ..., "updated_at": ...}`
 
-Evaluator model config loaded at startup from `EVALUATOR_*` env vars, passed into `create_app()`. No changes to existing routes.
+Evaluator model config loaded at startup from `EVALUATOR_*` env vars, passed into `create_app()`. **Signature change:** `create_app()` → `create_app(evaluator_config: ModelConfig)`. No changes to existing routes.
 
 ---
 
@@ -83,7 +85,7 @@ On button click:
 3. On success: update card in-place (no page reload)
 4. On error: show toast, re-enable button
 
-Reuses existing CSS classes: `.badge-good`, `.badge-bad`, `.btn-primary`. No new classes needed.
+Reuses existing CSS classes: `.badge-good`, `.badge-bad`, `.btn-primary` (assumed to exist in `style.css` — verify before implementing). No new classes needed.
 
 ---
 
@@ -107,6 +109,15 @@ question_bank.db
 | `EVALUATOR_API_KEY` | LLM evaluator API key | `DEEPSEEK_API_KEY` |
 | `EVALUATOR_BASE_URL` | LLM evaluator base URL | `https://api.deepseek.com` |
 | `EVALUATOR_MODEL` | LLM evaluator model name | `deepseek-v4-pro` |
+
+Lines to add to `.env.template`:
+
+```
+# LLM Evaluator (leave blank to fall back to DeepSeek defaults)
+EVALUATOR_API_KEY=
+EVALUATOR_BASE_URL=
+EVALUATOR_MODEL=
+```
 
 ---
 
