@@ -260,6 +260,32 @@
     }
   }
 
+  function buildLlmEvaluatorHTML(review) {
+    if (review && review.llm_evaluator_rating) {
+      const badgeClass =
+        review.llm_evaluator_rating === "Good" ? "badge-good" : "badge-bad";
+      return `
+        <div>
+          <div class="meta-label">Rating</div>
+          <div class="meta-value">
+            <span class="badge ${badgeClass}">${esc(review.llm_evaluator_rating)}</span>
+          </div>
+        </div>
+        <div style="margin-top:10px;">
+          <div class="meta-label">Critique</div>
+          <div class="meta-value">${esc(review.llm_evaluator_critique || "")}</div>
+        </div>
+        <div style="margin-top:12px;text-align:right;">
+          <button class="btn-primary" id="btn-llm-review">Re-run</button>
+        </div>`;
+    }
+    return `
+      <div class="placeholder-text">Not yet evaluated</div>
+      <div style="margin-top:12px;text-align:right;">
+        <button class="btn-primary" id="btn-llm-review">Request LLM Review</button>
+      </div>`;
+  }
+
   function buildDetailHTML(detail, idx, total, prevId, nextId) {
     const ctx = detail.context_data;
     const review = detail.review;
@@ -311,11 +337,6 @@
       }
     }
 
-    const llmSection = review && review.llm_evaluator_rating
-      ? `<div><div class="meta-label">Rating</div><div class="meta-value">${esc(review.llm_evaluator_rating)}</div></div>
-         <div><div class="meta-label">Critique</div><div class="meta-value">${esc(review.llm_evaluator_critique)}</div></div>`
-      : `<div class="placeholder-text">Not yet evaluated</div>`;
-
     return `
       ${outdated ? '<div class="banner-outdated">Snapshot outdated — the context has been regenerated since this review was created.</div>' : ""}
 
@@ -360,13 +381,39 @@
 
           <div class="card">
             <div class="card-header">LLM Evaluator (automated)</div>
-            <div class="card-body">${llmSection}</div>
+            <div class="card-body" id="llm-evaluator-body">${buildLlmEvaluatorHTML(review)}</div>
           </div>
 
           <a class="back-link" id="btn-back">&#8592; Back to list</a>
         </div>
       </div>
     `;
+  }
+
+  function bindLlmReviewBtn(contextId) {
+    const btn = document.getElementById("btn-llm-review");
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      const body = document.getElementById("llm-evaluator-body");
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Évaluation en cours…";
+      try {
+        const result = await api(`/contexts/${contextId}/llm-review`, {
+          method: "POST",
+        });
+        body.innerHTML = buildLlmEvaluatorHTML({
+          llm_evaluator_rating: result.rating,
+          llm_evaluator_critique: result.critique,
+        });
+        bindLlmReviewBtn(contextId);
+        showToast("LLM review complete");
+      } catch (err) {
+        showToast(`Error: ${err.message}`, "error");
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    });
   }
 
   function bindDetailEvents(detail, prevId, nextId) {
@@ -439,6 +486,7 @@
       e.preventDefault();
       location.hash = "#/";
     });
+    bindLlmReviewBtn(contextId);
   }
 
   function renderSidebar(activeId) {
