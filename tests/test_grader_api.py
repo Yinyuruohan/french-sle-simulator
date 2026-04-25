@@ -340,7 +340,7 @@ def test_get_contexts_combined_filters(client, db_path):
 
 @patch("grader.app.evaluate_context")
 def test_post_llm_review_success(mock_eval, client, db_path):
-    """POST /api/contexts/<id>/llm-review returns rating, critique, updated_at."""
+    """POST /api/contexts/<id>/llm-review returns rating, critique, updated_at and persists to DB."""
     context_ids = _seed_contexts(db_path, 1)
     mock_eval.return_value = {"rating": "Good", "critique": "Well done."}
 
@@ -351,6 +351,11 @@ def test_post_llm_review_success(mock_eval, client, db_path):
     assert data["rating"] == "Good"
     assert data["critique"] == "Well done."
     assert "updated_at" in data
+
+    # Verify persistence: GET the context and confirm llm_evaluator fields are stored
+    detail = client.get(f"/api/contexts/{context_ids[0]}").get_json()
+    assert detail["review"]["llm_evaluator_rating"] == "Good"
+    assert detail["review"]["llm_evaluator_critique"] == "Well done."
 
 
 @patch("grader.app.evaluate_context")

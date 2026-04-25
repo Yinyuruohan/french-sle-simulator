@@ -151,6 +151,8 @@ def create_app(evaluator_config: ModelConfig | None = None):
             result = evaluate_context(context_data, evaluator_config)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 502
+        except Exception as exc:
+            return jsonify({"error": f"LLM call failed: {exc}"}), 502
 
         saved = save_llm_review(context_id, result["rating"], result["critique"])
         if saved is None:
