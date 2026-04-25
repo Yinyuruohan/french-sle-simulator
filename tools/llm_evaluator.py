@@ -19,6 +19,9 @@ def _read_judge_prompt() -> str:
         return f.read()
 
 
+_JUDGE_PROMPT: str = _read_judge_prompt()
+
+
 def _serialize_context(context_data: dict) -> str:
     lines = [
         f"Type: {context_data['type']}",
@@ -39,7 +42,7 @@ def _serialize_context(context_data: dict) -> str:
 
 def _parse_response(text: str) -> dict:
     rating_match = re.search(
-        r"\*{0,2}Rating:?\*{0,2}\s*(Good|Bad)", text, re.IGNORECASE
+        r"\*{0,2}Rating:?\*{0,2}\s*(Good|Bad)\b", text, re.IGNORECASE
     )
     if not rating_match:
         raise ValueError(
@@ -61,7 +64,7 @@ def evaluate_context(context_data: dict, model_config: ModelConfig) -> dict:
 
     Raises ValueError if the LLM response is malformed (no Rating line).
     """
-    system_prompt = _read_judge_prompt()
+    system_prompt = _JUDGE_PROMPT
     user_message = _serialize_context(context_data)
 
     client = OpenAI(api_key=model_config.api_key, base_url=model_config.base_url)
