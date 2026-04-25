@@ -394,7 +394,6 @@
     const btn = document.getElementById("btn-llm-review");
     if (!btn) return;
     btn.addEventListener("click", async () => {
-      const body = document.getElementById("llm-evaluator-body");
       const originalText = btn.textContent;
       btn.disabled = true;
       btn.textContent = "Évaluation en cours…";
@@ -402,10 +401,13 @@
         const result = await api(`/contexts/${contextId}/llm-review`, {
           method: "POST",
         });
+        const body = document.getElementById("llm-evaluator-body");
+        if (!body) return; // user navigated away while request was in flight
         body.innerHTML = buildLlmEvaluatorHTML({
           llm_evaluator_rating: result.rating,
           llm_evaluator_critique: result.critique,
         });
+        // A new #btn-llm-review was created by innerHTML — re-bind its handler.
         bindLlmReviewBtn(contextId);
         showToast("LLM review complete");
       } catch (err) {
