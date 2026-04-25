@@ -11,7 +11,6 @@ import json
 import os
 import sqlite3
 from datetime import datetime
-from typing import Optional
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "question_bank.db")
 
@@ -48,7 +47,7 @@ def init_reviews_table():
 
 
 def cleanup_empty_reviews() -> int:
-    """Delete reviews where expert_rating is NULL. Returns the number of rows deleted."""
+    """Delete reviews where both expert_rating and llm_evaluator_rating are NULL. Returns the number of rows deleted."""
     conn = _get_conn()
     try:
         cursor = conn.execute(
@@ -225,7 +224,7 @@ def save_review(context_id: str, expert_rating: str, expert_critique: str | None
 
 def save_llm_review(
     context_id: str, llm_rating: str, llm_critique: str
-) -> Optional[dict]:
+) -> dict | None:
     """
     Create or update the LLM evaluator fields for the given context_id.
 
@@ -234,6 +233,9 @@ def save_llm_review(
 
     Returns {"updated_at": <iso string>} or None if context_id not in contexts table.
     """
+    if llm_rating not in ("Good", "Bad"):
+        raise ValueError(f"llm_rating must be 'Good' or 'Bad', got {llm_rating!r}")
+
     now = datetime.now().isoformat()
 
     conn = _get_conn()

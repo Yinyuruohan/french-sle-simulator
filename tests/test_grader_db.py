@@ -516,3 +516,15 @@ def test_cleanup_empty_reviews_preserves_llm_only_rows(db_path):
 
     row = get_review(context_ids[0])
     assert row is not None
+
+
+def test_save_llm_review_rejects_invalid_rating(db_path):
+    """save_llm_review raises ValueError for an invalid llm_rating value."""
+    from tools.grader_db import init_reviews_table, save_llm_review
+    from tools.question_bank import init_db
+
+    init_db()
+    init_reviews_table()
+
+    with pytest.raises(ValueError, match="llm_rating must be"):
+        save_llm_review("any-id", "invalid", "some critique")
