@@ -23,7 +23,7 @@ def load_default_configs() -> "dict[str, ModelConfig]":
     """Read per-tool model config from env, falling back to DEEPSEEK_* vars."""
     deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_url = "https://api.deepseek.com"
-    deepseek_model = "deepseek-chat"
+    deepseek_model = "deepseek-v4-pro"
 
     return {
         "generate": ModelConfig(
