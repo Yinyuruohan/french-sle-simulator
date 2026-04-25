@@ -24,14 +24,28 @@ from tools.grader_db import (
     get_review,
     init_reviews_table,
     is_snapshot_outdated,
+    save_llm_review,
     save_review,
 )
+from tools.llm_evaluator import evaluate_context
+from tools.model_config import ModelConfig
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
-def create_app():
+def _load_evaluator_config() -> ModelConfig:
+    deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
+    return ModelConfig(
+        model=os.getenv("EVALUATOR_MODEL", "deepseek-v4-pro"),
+        base_url=os.getenv("EVALUATOR_BASE_URL", "https://api.deepseek.com"),
+        api_key=os.getenv("EVALUATOR_API_KEY") or deepseek_key,
+    )
+
+
+def create_app(evaluator_config: ModelConfig | None = None):
     """Application factory. Initialises DB tables and registers all routes."""
+    if evaluator_config is None:
+        evaluator_config = _load_evaluator_config()
     app = Flask(__name__, static_folder=None)
 
     # ── Startup ───────────────────────────────────────────────────────────────
@@ -123,6 +137,30 @@ def create_app():
             return jsonify({"error": "Context not found"}), 404
 
         return jsonify({"success": True, "updated_at": result["updated_at"]})
+
+    # ── POST /api/contexts/<context_id>/llm-review ────────────────────────────
+
+    @app.route("/api/contexts/<context_id>/llm-review", methods=["POST"])
+    def post_llm_review(context_id):
+        """Request an LLM evaluation for the given context."""
+        context_data = get_context_data(context_id)
+        if context_data is None:
+            return jsonify({"error": "Context not found"}), 404
+
+        try:
+            result = evaluate_context(context_data, evaluator_config)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 502
+
+        saved = save_llm_review(context_id, result["rating"], result["critique"])
+        if saved is None:
+            return jsonify({"error": "Internal error saving LLM review"}), 500
+
+        return jsonify({
+            "rating": result["rating"],
+            "critique": result["critique"],
+            "updated_at": saved["updated_at"],
+        })
 
     # ── GET /api/export ───────────────────────────────────────────────────────
 
