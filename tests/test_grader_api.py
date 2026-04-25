@@ -379,3 +379,17 @@ def test_post_llm_review_502_on_malformed_response(mock_eval, client, db_path):
 
     assert resp.status_code == 502
     assert "error" in resp.get_json()
+
+
+@patch("grader.app.evaluate_context")
+def test_post_llm_review_502_on_llm_network_error(mock_eval, client, db_path):
+    """POST /api/contexts/<id>/llm-review returns 502 on any non-ValueError LLM exception."""
+    context_ids = _seed_contexts(db_path, 1)
+    mock_eval.side_effect = RuntimeError("connection refused")
+
+    resp = client.post(f"/api/contexts/{context_ids[0]}/llm-review")
+
+    assert resp.status_code == 502
+    data = resp.get_json()
+    assert "error" in data
+    assert "LLM call failed" in data["error"]
