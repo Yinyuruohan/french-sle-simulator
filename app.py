@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from tools.generate_exam import generate_exam, regenerate_context, resave_exam_markdown
 from tools.evaluate_exam import evaluate_exam
 from tools.review_exam import review_exam_quality, log_system_errors
-from tools.model_config import ModelConfig, load_default_configs
+from tools.model_config import ModelConfig, load_default_configs, MODEL_BASE_URLS, get_provider_default_key
 from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, update_last_incorrect, assemble_exam_from_cache, get_bank_stats, prefill_bank, flag_context
 
 st.set_page_config(
@@ -23,6 +23,13 @@ st.set_page_config(
     page_icon="📝",
     layout="wide",
 )
+
+_MODEL_OPTIONS = [
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "gemini-3-flash-preview",
+    "Custom…",
+]
 
 if "stage" not in st.session_state:
     st.session_state.stage = "welcome"
@@ -824,8 +831,8 @@ def render_setup():
     # Question bank status
     bank_stats = get_bank_stats()
     st.markdown(f"**Question bank:** {bank_stats['total_questions']} questions available "
-                f"({bank_stats['battle_tested']} battle-tested, {bank_stats['reviewed']} reviewed, "
-                f"{bank_stats.get('warned', 0)} warned)")
+                f"({bank_stats['battle_tested_questions']} battle-tested, {bank_stats['reviewed_questions']} reviewed, "
+                f"{bank_stats.get('warned_questions', 0)} warned)")
 
     col_prefill1, col_prefill2 = st.columns([3, 1])
     with col_prefill1:
@@ -844,23 +851,36 @@ def render_setup():
                 st.error(f"Pre-fill failed: {e}")
 
     with st.expander("AI model settings (optional)"):
-        for tool_key, label in [("generate", "Generation"), ("evaluate", "Evaluation"), ("review", "Review")]:
+        for tool_key, label in [("generate", "Generation"), ("review", "Review")]:
             cfg = st.session_state.model_configs[tool_key]
             st.markdown(f"**{label}**")
             col1, col2, col3 = st.columns(3)
             with col1:
-                model = st.text_input("Model", value=cfg.model, key=f"{tool_key}_model")
+                default = cfg.model if cfg.model in _MODEL_OPTIONS else "Custom…"
+                selection = st.selectbox("Model", _MODEL_OPTIONS,
+                                         index=_MODEL_OPTIONS.index(default),
+                                         key=f"{tool_key}_model_select")
+                if selection == "Custom…":
+                    model = st.text_input("Custom model name", value=cfg.model,
+                                          key=f"{tool_key}_model_custom")
+                else:
+                    model = selection
             with col2:
-                base_url = st.text_input("Base URL", value=cfg.base_url, key=f"{tool_key}_base_url")
+                if selection in MODEL_BASE_URLS:
+                    base_url = MODEL_BASE_URLS[selection]
+                else:
+                    base_url = st.text_input("Base URL", value=cfg.base_url, key=f"{tool_key}_base_url")
             with col3:
                 api_key = st.text_input("API Key", value="", placeholder="leave blank to use .env",
                                         type="password", key=f"{tool_key}_api_key")
-            # Runs on every Streamlit rerun. The 'api_key or cfg.api_key' guard prevents
-            # a blank password field from overwriting a key already stored in session state.
+            # Runs on every Streamlit rerun. When a known model is selected the base_url
+            # may have switched providers, so fall back to the matching provider key rather
+            # than the stale key stored in cfg.
+            provider_key = get_provider_default_key(base_url) if selection in MODEL_BASE_URLS else cfg.api_key
             st.session_state.model_configs[tool_key] = ModelConfig(
                 model=model,
                 base_url=base_url,
-                api_key=api_key or cfg.api_key,
+                api_key=api_key or provider_key,
             )
 
     # Check cache availability for button labels
@@ -1037,6 +1057,7 @@ def render_exam():
                     options=["A", "B", "C", "D"],
                     format_func=lambda x, od=options_display: od[["A", "B", "C", "D"].index(x)],
                     key=f"q_{qid}",
+                    index=None,
                 )
                 user_answers[qid] = answer
                 st.markdown("")

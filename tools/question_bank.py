@@ -138,13 +138,18 @@ def get_bank_stats() -> dict:
     finally:
         conn.close()
 
-    stats = {"total_contexts": 0, "total_questions": 0, "reviewed": 0, "battle_tested": 0, "warned": 0}
+    stats = {
+        "total_contexts": 0, "total_questions": 0,
+        "reviewed": 0, "battle_tested": 0, "warned": 0,
+        "reviewed_questions": 0, "battle_tested_questions": 0, "warned_questions": 0,
+    }
     for row in rows:
         status, count, q_sum = row[0], row[1], row[2]
         stats["total_contexts"] += count
         stats["total_questions"] += q_sum
         if status in ("reviewed", "battle_tested", "warned"):
             stats[status] = count
+            stats[f"{status}_questions"] = q_sum
 
     return stats
 

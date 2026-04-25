@@ -12,11 +12,29 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+MODEL_BASE_URLS: "dict[str, str]" = {
+    "deepseek-v4-pro": "https://api.deepseek.com",
+    "deepseek-v4-flash": "https://api.deepseek.com",
+    "gemini-3-flash-preview": "https://generativelanguage.googleapis.com/v1beta/openai/",
+}
+
+
 @dataclass
 class ModelConfig:
     api_key: str
     base_url: str
     model: str
+
+
+def get_provider_default_key(base_url: str) -> str:
+    """Return the best-matching API key from env for a given provider base URL."""
+    if "deepseek.com" in base_url:
+        return os.getenv("DEEPSEEK_API_KEY", "")
+    if "googleapis.com" in base_url:
+        return os.getenv("GOOGLE_API_KEY") or os.getenv("GENERATE_API_KEY", "")
+    if "openai.com" in base_url:
+        return os.getenv("OPENAI_API_KEY", "")
+    return os.getenv("DEEPSEEK_API_KEY", "")
 
 
 def load_default_configs() -> "dict[str, ModelConfig]":
