@@ -11,6 +11,7 @@ import json
 import os
 import sqlite3
 from datetime import datetime
+from typing import Optional
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "question_bank.db")
 
@@ -50,7 +51,9 @@ def cleanup_empty_reviews() -> int:
     """Delete reviews where expert_rating is NULL. Returns the number of rows deleted."""
     conn = _get_conn()
     try:
-        cursor = conn.execute("DELETE FROM reviews WHERE expert_rating IS NULL")
+        cursor = conn.execute(
+            "DELETE FROM reviews WHERE expert_rating IS NULL AND llm_evaluator_rating IS NULL"
+        )
         conn.commit()
         return cursor.rowcount
     finally:
@@ -213,6 +216,53 @@ def save_review(context_id: str, expert_rating: str, expert_critique: str | None
                     created_at, updated_at)
                    VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?)""",
                 (context_id, snapshot, expert_rating, expert_critique, now, now),
+            )
+            conn.commit()
+            return {"updated_at": now}
+    finally:
+        conn.close()
+
+
+def save_llm_review(
+    context_id: str, llm_rating: str, llm_critique: str
+) -> Optional[dict]:
+    """
+    Create or update the LLM evaluator fields for the given context_id.
+
+    If a review row exists: UPDATE llm_evaluator_rating, llm_evaluator_critique, updated_at only.
+    If no row exists: INSERT a new row with a context snapshot; expert_rating and agreement left NULL.
+
+    Returns {"updated_at": <iso string>} or None if context_id not in contexts table.
+    """
+    now = datetime.now().isoformat()
+
+    conn = _get_conn()
+    try:
+        existing = conn.execute(
+            "SELECT context_id FROM reviews WHERE context_id = ?", (context_id,)
+        ).fetchone()
+
+        if existing:
+            conn.execute(
+                """UPDATE reviews
+                   SET llm_evaluator_rating = ?, llm_evaluator_critique = ?, updated_at = ?
+                   WHERE context_id = ?""",
+                (llm_rating, llm_critique, now, context_id),
+            )
+            conn.commit()
+            return {"updated_at": now}
+        else:
+            snapshot = _snapshot_context(conn, context_id)
+            if snapshot is None:
+                return None
+
+            conn.execute(
+                """INSERT INTO reviews
+                   (context_id, model_output, expert_rating, expert_critique,
+                    llm_evaluator_rating, llm_evaluator_critique, agreement,
+                    created_at, updated_at)
+                   VALUES (?, ?, NULL, NULL, ?, ?, NULL, ?, ?)""",
+                (context_id, snapshot, llm_rating, llm_critique, now, now),
             )
             conn.commit()
             return {"updated_at": now}
