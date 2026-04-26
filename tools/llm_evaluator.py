@@ -75,7 +75,7 @@ def evaluate_context(context_data: dict, model_config: ModelConfig) -> dict:
             {"role": "user", "content": user_message},
         ],
         temperature=0.1,
-        max_tokens=512,
+        max_tokens=4096,
     )
 
     text = response.choices[0].message.content
