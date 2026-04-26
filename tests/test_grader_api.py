@@ -393,3 +393,16 @@ def test_post_llm_review_502_on_llm_network_error(mock_eval, client, db_path):
     data = resp.get_json()
     assert "error" in data
     assert "LLM call failed" in data["error"]
+
+
+@patch("grader.app.save_llm_review", return_value=None)
+@patch("grader.app.evaluate_context")
+def test_post_llm_review_500_on_save_failure(mock_eval, mock_save, client, db_path):
+    """POST /api/contexts/<id>/llm-review returns 500 if save_llm_review returns None."""
+    context_ids = _seed_contexts(db_path, 1)
+    mock_eval.return_value = {"rating": "Good", "critique": "Fine."}
+
+    resp = client.post(f"/api/contexts/{context_ids[0]}/llm-review")
+
+    assert resp.status_code == 500
+    assert "error" in resp.get_json()

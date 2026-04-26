@@ -3,7 +3,7 @@ Model configuration for SLE exam simulator tools.
 
 Provides ModelConfig dataclass and load_default_configs() which reads
 per-tool model settings from environment variables, falling back to
-DEEPSEEK_API_KEY + deepseek-chat defaults.
+DEEPSEEK_API_KEY + deepseek-v4-pro defaults.
 """
 import os
 from dataclasses import dataclass

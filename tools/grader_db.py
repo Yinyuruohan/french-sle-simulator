@@ -69,10 +69,12 @@ def get_contexts_for_review(filters: dict) -> dict:
         filters: dict with optional keys:
             - status: exact match on c.status
             - flagged: "true" = user_flags >= 1, "false" = user_flags == 0
-            - reviewed: "true" = expert_rating IS NOT NULL, "false" = context_id IS NULL in reviews
+            - reviewed: "true" = expert_rating IS NOT NULL, "false" = expert_rating IS NULL
+              Note: reviewed=false includes both unreviewed contexts and LLM-only rows.
 
     Returns:
-        {"total": int, "items": [{"context_id", "status", "user_flags", "expert_rating"}, ...]}
+        {"total": int, "items": [{"context_id", "type", "status", "user_flags", "expert_rating",
+                                   "llm_evaluator_rating"}, ...]}
     """
     conditions = []
     params = []
@@ -92,7 +94,7 @@ def get_contexts_for_review(filters: dict) -> dict:
     if reviewed == "true":
         conditions.append("r.expert_rating IS NOT NULL")
     elif reviewed == "false":
-        conditions.append("r.context_id IS NULL")
+        conditions.append("r.expert_rating IS NULL")
 
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 

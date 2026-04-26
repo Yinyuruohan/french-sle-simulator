@@ -5,7 +5,7 @@
   // ── State ──────────────────────────────────────────────────────────────
   const state = {
     filters: JSON.parse(sessionStorage.getItem("grader_filters") || "{}"),
-    contextList: [], // {context_id, type, status, user_flags, expert_rating}[]
+    contextList: [], // {context_id, type, status, user_flags, expert_rating, llm_evaluator_rating}[]
     currentContextId: null,
   };
 

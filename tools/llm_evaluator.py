@@ -79,4 +79,9 @@ def evaluate_context(context_data: dict, model_config: ModelConfig) -> dict:
     )
 
     text = response.choices[0].message.content
+    if not text:
+        raise ValueError(
+            "Malformed LLM response: content was empty or None "
+            f"(finish_reason={response.choices[0].finish_reason!r})"
+        )
     return _parse_response(text)
