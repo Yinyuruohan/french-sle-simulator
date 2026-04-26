@@ -76,4 +76,4 @@ def test_default_base_url_and_model(monkeypatch):
     configs = load_default_configs()
 
     assert configs["generate"].base_url == "https://api.deepseek.com"
-    assert configs["generate"].model == "deepseek-chat"
+    assert configs["generate"].model == "deepseek-v4-pro"
