@@ -449,3 +449,82 @@ def test_is_snapshot_outdated_returns_none_when_context_deleted(db_path):
 
     result = is_snapshot_outdated(context_ids[0])
     assert result is None
+
+
+# ── Task LLM Evaluator: save_llm_review and cleanup fix ──────────────────────
+
+def test_save_llm_review_insert(db_path):
+    """save_llm_review inserts a new row when no review exists."""
+    from tools.grader_db import init_reviews_table, save_llm_review, get_review
+
+    context_ids = _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    result = save_llm_review(context_ids[0], "Good", "Well-formed question.")
+
+    assert result is not None
+    assert "updated_at" in result
+
+    row = get_review(context_ids[0])
+    assert row is not None
+    assert row["llm_evaluator_rating"] == "Good"
+    assert row["llm_evaluator_critique"] == "Well-formed question."
+    assert row["expert_rating"] is None
+
+
+def test_save_llm_review_update_existing_row(db_path):
+    """save_llm_review updates only llm fields when an expert review row already exists."""
+    from tools.grader_db import init_reviews_table, save_llm_review, save_review, get_review
+
+    context_ids = _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    save_review(context_ids[0], "Good", "Expert says good.")
+    result = save_llm_review(context_ids[0], "Bad", "LLM says bad.")
+
+    assert result is not None
+    row = get_review(context_ids[0])
+    assert row["llm_evaluator_rating"] == "Bad"
+    assert row["llm_evaluator_critique"] == "LLM says bad."
+    assert row["expert_rating"] == "Good"
+    assert row["expert_critique"] == "Expert says good."
+
+
+def test_save_llm_review_returns_none_for_missing_context(db_path):
+    """save_llm_review returns None when context_id is not in the contexts table."""
+    from tools.grader_db import init_reviews_table, save_llm_review
+    from tools.question_bank import init_db
+
+    init_db()
+    init_reviews_table()
+
+    result = save_llm_review("nonexistent-id", "Good", "Some critique")
+    assert result is None
+
+
+def test_cleanup_empty_reviews_preserves_llm_only_rows(db_path):
+    """cleanup_empty_reviews must NOT delete rows that have llm_evaluator_rating set."""
+    from tools.grader_db import init_reviews_table, save_llm_review, cleanup_empty_reviews, get_review
+
+    context_ids = _seed_contexts(db_path, 1)
+    init_reviews_table()
+
+    save_llm_review(context_ids[0], "Good", "LLM critique.")
+
+    deleted = cleanup_empty_reviews()
+    assert deleted == 0
+
+    row = get_review(context_ids[0])
+    assert row is not None
+
+
+def test_save_llm_review_rejects_invalid_rating(db_path):
+    """save_llm_review raises ValueError for an invalid llm_rating value."""
+    from tools.grader_db import init_reviews_table, save_llm_review
+    from tools.question_bank import init_db
+
+    init_db()
+    init_reviews_table()
+
+    with pytest.raises(ValueError, match="llm_rating must be"):
+        save_llm_review("any-id", "invalid", "some critique")

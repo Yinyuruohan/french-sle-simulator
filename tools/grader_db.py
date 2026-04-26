@@ -47,10 +47,12 @@ def init_reviews_table():
 
 
 def cleanup_empty_reviews() -> int:
-    """Delete reviews where expert_rating is NULL. Returns the number of rows deleted."""
+    """Delete reviews where both expert_rating and llm_evaluator_rating are NULL. Returns the number of rows deleted."""
     conn = _get_conn()
     try:
-        cursor = conn.execute("DELETE FROM reviews WHERE expert_rating IS NULL")
+        cursor = conn.execute(
+            "DELETE FROM reviews WHERE expert_rating IS NULL AND llm_evaluator_rating IS NULL"
+        )
         conn.commit()
         return cursor.rowcount
     finally:
@@ -67,10 +69,12 @@ def get_contexts_for_review(filters: dict) -> dict:
         filters: dict with optional keys:
             - status: exact match on c.status
             - flagged: "true" = user_flags >= 1, "false" = user_flags == 0
-            - reviewed: "true" = expert_rating IS NOT NULL, "false" = context_id IS NULL in reviews
+            - reviewed: "true" = expert_rating IS NOT NULL, "false" = expert_rating IS NULL
+              Note: reviewed=false includes both unreviewed contexts and LLM-only rows.
 
     Returns:
-        {"total": int, "items": [{"context_id", "status", "user_flags", "expert_rating"}, ...]}
+        {"total": int, "items": [{"context_id", "type", "status", "user_flags", "expert_rating",
+                                   "llm_evaluator_rating"}, ...]}
     """
     conditions = []
     params = []
@@ -90,12 +94,12 @@ def get_contexts_for_review(filters: dict) -> dict:
     if reviewed == "true":
         conditions.append("r.expert_rating IS NOT NULL")
     elif reviewed == "false":
-        conditions.append("r.context_id IS NULL")
+        conditions.append("r.expert_rating IS NULL")
 
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     query = f"""
-        SELECT c.context_id, c.type, c.status, c.user_flags, r.expert_rating
+        SELECT c.context_id, c.type, c.status, c.user_flags, r.expert_rating, r.llm_evaluator_rating
         FROM contexts c
         LEFT JOIN reviews r ON c.context_id = r.context_id
         {where_clause}
@@ -115,6 +119,7 @@ def get_contexts_for_review(filters: dict) -> dict:
             "status": row["status"],
             "user_flags": row["user_flags"],
             "expert_rating": row["expert_rating"],
+            "llm_evaluator_rating": row["llm_evaluator_rating"],
         }
         for row in rows
     ]
@@ -213,6 +218,56 @@ def save_review(context_id: str, expert_rating: str, expert_critique: str | None
                     created_at, updated_at)
                    VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?)""",
                 (context_id, snapshot, expert_rating, expert_critique, now, now),
+            )
+            conn.commit()
+            return {"updated_at": now}
+    finally:
+        conn.close()
+
+
+def save_llm_review(
+    context_id: str, llm_rating: str, llm_critique: str
+) -> dict | None:
+    """
+    Create or update the LLM evaluator fields for the given context_id.
+
+    If a review row exists: UPDATE llm_evaluator_rating, llm_evaluator_critique, updated_at only.
+    If no row exists: INSERT a new row with a context snapshot; expert_rating and agreement left NULL.
+
+    Returns {"updated_at": <iso string>} or None if context_id not in contexts table.
+    """
+    if llm_rating not in ("Good", "Bad"):
+        raise ValueError(f"llm_rating must be 'Good' or 'Bad', got {llm_rating!r}")
+
+    now = datetime.now().isoformat()
+
+    conn = _get_conn()
+    try:
+        existing = conn.execute(
+            "SELECT context_id FROM reviews WHERE context_id = ?", (context_id,)
+        ).fetchone()
+
+        if existing:
+            conn.execute(
+                """UPDATE reviews
+                   SET llm_evaluator_rating = ?, llm_evaluator_critique = ?, updated_at = ?
+                   WHERE context_id = ?""",
+                (llm_rating, llm_critique, now, context_id),
+            )
+            conn.commit()
+            return {"updated_at": now}
+        else:
+            snapshot = _snapshot_context(conn, context_id)
+            if snapshot is None:
+                return None
+
+            conn.execute(
+                """INSERT INTO reviews
+                   (context_id, model_output, expert_rating, expert_critique,
+                    llm_evaluator_rating, llm_evaluator_critique, agreement,
+                    created_at, updated_at)
+                   VALUES (?, ?, NULL, NULL, ?, ?, NULL, ?, ?)""",
+                (context_id, snapshot, llm_rating, llm_critique, now, now),
             )
             conn.commit()
             return {"updated_at": now}

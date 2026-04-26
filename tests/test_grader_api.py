@@ -5,6 +5,7 @@ import json
 import sqlite3
 import uuid
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -332,3 +333,76 @@ def test_get_contexts_combined_filters(client, db_path):
     data2 = response2.get_json()
     assert data2["total"] == 1
     assert data2["items"][0]["context_id"] == context_ids[2]
+
+
+# ── LLM Evaluator endpoint ────────────────────────────────────────────────────
+
+
+@patch("grader.app.evaluate_context")
+def test_post_llm_review_success(mock_eval, client, db_path):
+    """POST /api/contexts/<id>/llm-review returns rating, critique, updated_at and persists to DB."""
+    context_ids = _seed_contexts(db_path, 1)
+    mock_eval.return_value = {"rating": "Good", "critique": "Well done."}
+
+    resp = client.post(f"/api/contexts/{context_ids[0]}/llm-review")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["rating"] == "Good"
+    assert data["critique"] == "Well done."
+    assert "updated_at" in data
+
+    # Verify persistence: GET the context and confirm llm_evaluator fields are stored
+    detail = client.get(f"/api/contexts/{context_ids[0]}").get_json()
+    assert detail["review"]["llm_evaluator_rating"] == "Good"
+    assert detail["review"]["llm_evaluator_critique"] == "Well done."
+
+
+@patch("grader.app.evaluate_context")
+def test_post_llm_review_404_for_unknown_context(mock_eval, client, db_path):
+    """POST /api/contexts/<id>/llm-review returns 404 for a context not in DB."""
+    _seed_contexts(db_path, 0)
+
+    resp = client.post("/api/contexts/does-not-exist/llm-review")
+
+    assert resp.status_code == 404
+    mock_eval.assert_not_called()
+
+
+@patch("grader.app.evaluate_context")
+def test_post_llm_review_502_on_malformed_response(mock_eval, client, db_path):
+    """POST /api/contexts/<id>/llm-review returns 502 when evaluate_context raises ValueError."""
+    context_ids = _seed_contexts(db_path, 1)
+    mock_eval.side_effect = ValueError("Malformed LLM response: no Rating found.")
+
+    resp = client.post(f"/api/contexts/{context_ids[0]}/llm-review")
+
+    assert resp.status_code == 502
+    assert "error" in resp.get_json()
+
+
+@patch("grader.app.evaluate_context")
+def test_post_llm_review_502_on_llm_network_error(mock_eval, client, db_path):
+    """POST /api/contexts/<id>/llm-review returns 502 on any non-ValueError LLM exception."""
+    context_ids = _seed_contexts(db_path, 1)
+    mock_eval.side_effect = RuntimeError("connection refused")
+
+    resp = client.post(f"/api/contexts/{context_ids[0]}/llm-review")
+
+    assert resp.status_code == 502
+    data = resp.get_json()
+    assert "error" in data
+    assert "LLM call failed" in data["error"]
+
+
+@patch("grader.app.save_llm_review", return_value=None)
+@patch("grader.app.evaluate_context")
+def test_post_llm_review_500_on_save_failure(mock_eval, mock_save, client, db_path):
+    """POST /api/contexts/<id>/llm-review returns 500 if save_llm_review returns None."""
+    context_ids = _seed_contexts(db_path, 1)
+    mock_eval.return_value = {"rating": "Good", "critique": "Fine."}
+
+    resp = client.post(f"/api/contexts/{context_ids[0]}/llm-review")
+
+    assert resp.status_code == 500
+    assert "error" in resp.get_json()

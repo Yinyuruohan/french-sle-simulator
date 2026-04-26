@@ -12,6 +12,7 @@ Python scripts that make API calls, process data, and execute specific tasks for
 | `review_exam.py` | Unified conservative QA review of exam questions and explanations at temperature 0.1. Includes deterministic duplicate-option and structural-mismatch detection. Logs flagged issues to `system_error_tracking.md`. | 1 |
 | `question_bank.py` | SQLite question bank: initialise DB, cache validated contexts, assemble instant exams, prefill bank, flag contexts, manage status transitions. | 0 |
 | `grader_db.py` | Reviews table in the shared `question_bank.db`: initialise, CRUD, filtered queries, SHA-256 snapshot staleness detection. | 0 |
+| `llm_evaluator.py` | LLM judge: call the evaluator model with `LLM_judge_prompt.md` criteria and parse the rated response. | 1 |
 
 ## Key Functions
 
@@ -43,17 +44,23 @@ Python scripts that make API calls, process data, and execute specific tasks for
 
 ### grader_db.py
 - `init_reviews_table()` — create the `reviews` table if it doesn't exist
-- `cleanup_empty_reviews()` — delete rows where `expert_rating IS NULL` (startup cleanup)
-- `get_contexts_for_review(filters)` — list contexts with optional filters (status, flagged, reviewed); LEFT JOIN with reviews
+- `cleanup_empty_reviews()` — delete rows where both `expert_rating` and `llm_evaluator_rating` are NULL (startup cleanup)
+- `get_contexts_for_review(filters)` — list contexts with optional filters (status, flagged, reviewed); LEFT JOIN with reviews; returns `llm_evaluator_rating` per item
 - `get_review(context_id)` — retrieve a single review row by context_id
 - `save_review(context_id, expert_rating, expert_critique)` — create (with context snapshot) or update an existing review
+- `save_llm_review(context_id, llm_rating, llm_critique)` — create (with context snapshot) or update LLM evaluator fields only; expert fields untouched
 - `get_context_data(context_id)` — read live context fields from the contexts table
 - `is_snapshot_outdated(context_id)` — SHA-256 hash comparison of stored snapshot vs current context; returns `True`/`False`/`None`
 
+### llm_evaluator.py
+- `evaluate_context(context_data, model_config)` — serialize the context, call the LLM judge (`LLM_judge_prompt.md` as system prompt, temperature 0.1, max_tokens 4096), parse and return `{"rating": "Good"|"Bad", "critique": "..."}`. Raises `ValueError` if the response contains no `Rating:` line.
+
 ## Conventions
 
-- Tools that make API calls (`generate_exam.py`, `review_exam.py`) load credentials from `.env` via `python-dotenv`; `evaluate_exam.py` requires no credentials
+- Tools that make API calls (`generate_exam.py`, `review_exam.py`, `llm_evaluator.py`) load credentials from `.env` via `python-dotenv`; `evaluate_exam.py` requires no credentials
 - AI API accessed via the `openai` SDK with a configurable `base_url` (default: DeepSeek `https://api.deepseek.com`)
 - JSON response format enforced on all generation and review API calls
-- Temperature by purpose: 0.7 (generation), 0.1 (review)
+- Temperature by purpose: 0.7 (generation), 0.1 (review/evaluation)
+- `max_tokens` by purpose: 16000 (generation), 4096 (llm_evaluator — headroom for reasoning model chain-of-thought)
 - `grader_db.py` never writes to the `contexts` table — read-only access only
+- `llm_evaluator.py` reads `LLM_judge_prompt.md` once at module import and caches it; configured via `EVALUATOR_*` env vars

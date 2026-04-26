@@ -42,13 +42,16 @@ tools/
   review_exam.py          # Conservative QA review of exam questions and feedback explanations
   question_bank.py        # SQLite question bank: cache, assemble, prefill
   grader_db.py            # Reviews table: init, CRUD, filtered queries, staleness detection
+  llm_evaluator.py        # LLM judge: evaluate_context() rates a context Good/Bad with critique
+LLM_judge_prompt.md       # System prompt for the LLM evaluator judge (SLE criteria + output format)
 tests/
   test_model_config.py    # Unit tests for model_config.py (6 tests)
   test_generate_exam.py   # ModelConfig wiring tests for generate_exam.py (3 tests)
   test_question_bank.py   # Unit tests for question_bank.py (17 tests)
-  test_grader_db.py       # Unit tests for grader_db.py (19 tests)
-  test_grader_api.py      # Integration tests for grader Flask API (11 tests)
+  test_grader_db.py       # Unit tests for grader_db.py (24 tests)
+  test_grader_api.py      # Integration tests for grader Flask API (17 tests)
   test_grader_batch.py    # Unit + integration tests for batch export/import (28 tests)
+  test_llm_evaluator.py   # Unit tests for llm_evaluator.py (4 tests)
 workflows/
   sle_exam_simulator.md   # Full SOP for the exam workflow
 contexts/
@@ -80,7 +83,8 @@ Exams use a **contexts → questions** structure:
 
 ## Key Technical Details
 
-- **AI Engine:** Any OpenAI-compatible endpoint via `openai` Python SDK. Default: DeepSeek (`base_url="https://api.deepseek.com"`, model `deepseek-chat`). Per-tool overrides via `GENERATE_*`, `EVALUATE_*`, `REVIEW_*` env vars or the in-app "AI model settings" expander. `tools/model_config.py` is the single source of truth.
+- **AI Engine:** Any OpenAI-compatible endpoint via `openai` Python SDK. Default: DeepSeek (`base_url="https://api.deepseek.com"`, model `deepseek-v4-pro`). Per-tool overrides via `GENERATE_*`, `EVALUATE_*`, `REVIEW_*`, `EVALUATOR_*` env vars or the in-app "AI model settings" expander. `tools/model_config.py` is the single source of truth.
+- **LLM Evaluator:** `tools/llm_evaluator.py` — `evaluate_context(context_data, model_config)` calls the LLM judge (`LLM_judge_prompt.md` as system prompt) and returns `{"rating": "Good"|"Bad", "critique": "..."}`. Configured via `EVALUATOR_*` env vars (falls back to `DEEPSEEK_API_KEY` + `deepseek-v4-pro`). Uses `max_tokens=4096` to accommodate reasoning model chain-of-thought overhead.
 - **Exam generation:** Single API call produces questions AND explanations (why_correct + grammar_rule), JSON response format, temperature 0.7, max_tokens 16000. ~50% fill-in-blank, ~50% error identification, 2-20 questions. Prompt enforces broad grammar coverage: 11 real SLE topics, no topic repeated more than twice. Explanations must not reference option letters (shuffled post-generation). Post-generation option shuffling randomizes A/B/C/D for fill-in-blank questions; error identification options are never shuffled.
 - **Evaluation:** Fully deterministic — no API call. Scores answers against the answer key and displays pre-generated explanations from exam data.
 - **Quality review:** Single unified review (`review_exam_quality()`) validates questions AND explanations at temperature 0.1. Deterministic pre-checks: duplicate options and structural mismatches (passage blanks vs question IDs, error-ID segments vs options). Only deterministic failures (`duplicate_options`, `structural_mismatch`) are critical; all 11 AI-judgment categories are capped at "warning". Contexts with warnings cache as `warned` (never upgrade to `battle_tested`). User flagging deprioritizes contexts in assembly. Critical issues trigger targeted regeneration (max 1 retry per context). All flagged issues logged to `system_error_tracking.md`.

@@ -16,6 +16,7 @@ Provide subject-matter experts with a web interface to review AI-generated exam 
 | `grader/app.py` | Flask application: REST API endpoints + static SPA serving |
 | `grader/batch.py` | Batch Excel export (`export_to_excel`) and import (`import_from_excel`) |
 | `tools/grader_db.py` | Reviews table: init, CRUD, filtered queries, snapshot staleness detection |
+| `tools/llm_evaluator.py` | LLM judge: `evaluate_context()` rates a context Good/Bad with critique |
 | `tools/question_bank.py` | Read-only access to contexts table for live data |
 
 ## How to Run
@@ -33,39 +34,46 @@ Then open `http://localhost:5001` in a browser.
 
 ## Architecture
 
-- Flask backend with `create_app()` factory pattern
-- REST API under `/api/*` — 5 endpoints (list, detail, review, export, import)
+- Flask backend with `create_app(evaluator_config)` factory pattern; evaluator config loaded at startup from `EVALUATOR_*` env vars (fallback: `DEEPSEEK_API_KEY` + `deepseek-v4-pro`)
+- REST API under `/api/*` — 6 endpoints (list, detail, review, llm-review, export, import)
 - Static SPA frontend served at `/` (vanilla HTML/CSS/JS, no build step)
 - Shares `question_bank.db` with the Streamlit simulator
 - Writes only to the `reviews` table; never modifies the `contexts` table
 - Batch module (`grader/batch.py`) handles Excel formatting via `openpyxl`; `COLUMNS` list is the single source of truth for column schema
+- LLM evaluator (`tools/llm_evaluator.py`) uses `LLM_judge_prompt.md` as judge criteria; `max_tokens=4096` to accommodate reasoning model chain-of-thought
 
 ## Workflow Steps
 
-1. **Startup** — Flask initializes the `reviews` table (if not exists) and cleans up empty review records (expert_rating IS NULL)
+1. **Startup** — Flask initializes the `reviews` table (if not exists) and cleans up empty review records (rows where both `expert_rating` and `llm_evaluator_rating` are NULL)
 2. **List view** — Expert sees all contexts in a filterable table:
    - Filter by status (battle_tested, reviewed, warned)
    - Filter by user flags (flagged / unflagged)
    - Filter by review state (reviewed / not reviewed)
+   - Columns: Context ID, Status, Flags, Review (expert), LLM Rating
    - Clicking a row navigates to the detail view
 3. **Detail view** — Three-column layout:
    - **Left sidebar** — Scrollable navigator with "Fill-in #N" / "Error-ID #N" labels and review status dots (green = reviewed, gray = not reviewed)
    - **Center** — Context passage, questions with correct answer highlighted, grammar topic, and explanations (why_correct + grammar_rule)
-   - **Right panel** — Good/Bad rating toggle, free-text critique textarea, Submit/Update button, LLM Evaluator section (read-only, currently shows "Not yet evaluated")
-4. **Review submission** — Expert selects Good or Bad, optionally writes critique, clicks Submit:
+   - **Right panel** — Good/Bad rating toggle, free-text critique textarea, Submit/Update button, LLM Evaluator card (3 states: not evaluated / loading / rating+critique+Re-run)
+4. **LLM Evaluator** — Expert clicks "Request LLM Review" in the LLM Evaluator card:
+   - Button is disabled and shows "Évaluation en cours…" while the request is in flight
+   - `POST /api/contexts/{id}/llm-review` calls `evaluate_context()` and stores the result via `save_llm_review()`
+   - On success: card updates in-place with rating badge and critique; "Re-run" button replaces "Request LLM Review"
+   - On error: toast shown, button re-enabled
+5. **Review submission** — Expert selects Good or Bad, optionally writes critique, clicks Submit:
    - First submission creates a JSON snapshot of the context (`model_output`) for durability
    - Subsequent submissions update rating/critique without changing the snapshot
    - Sidebar dot updates optimistically; reverts on failure
    - Toast notification confirms success or shows error
-5. **Navigation** — Previous/Next buttons + sidebar clicks allow moving through contexts without returning to list view. All navigation respects active filters.
-6. **Snapshot staleness** — If a context is regenerated after its review snapshot was taken, the detail view displays a "Snapshot outdated" banner. Detection uses SHA-256 hash comparison of passage + questions + grammar_topics.
-7. **Batch export** — Expert clicks "↓ Download Excel" in the list view:
+6. **Navigation** — Previous/Next buttons + sidebar clicks allow moving through contexts without returning to list view. All navigation respects active filters.
+7. **Snapshot staleness** — If a context is regenerated after its review snapshot was taken, the detail view displays a "Snapshot outdated" banner. Detection uses SHA-256 hash comparison of passage + questions + grammar_topics.
+8. **Batch export** — Expert clicks "↓ Download Excel" in the list view:
    - Active filters are forwarded to `GET /api/export` as query parameters
    - `export_to_excel()` builds one row per question; context-level fields repeat across rows
    - Editable cells (`expert_rating`, `expert_critique`) are yellow and unlocked on the first row of each context; all other cells are grey and locked
    - `expert_rating` column has a dropdown constraint: only "Good" and "Bad" are accepted
    - File is named `grader_export_YYYY-MM-DD.xlsx`
-8. **Batch import** — Expert clicks "↑ Upload Excel" and selects a filled-in file:
+9. **Batch import** — Expert clicks "↑ Upload Excel" and selects a filled-in file:
    - File is posted to `POST /api/import`
    - `import_from_excel()` reads the first row of each contiguous context block; subsequent question rows are skipped
    - Blank ratings are skipped (counted as `skipped`); invalid ratings are collected as errors
@@ -83,8 +91,8 @@ Then open `http://localhost:5001` in a browser.
 | model_output | TEXT | JSON snapshot of context at review time |
 | expert_rating | TEXT | 'Good' or 'Bad' (NULL = not yet reviewed) |
 | expert_critique | TEXT | Free-text annotation |
-| llm_evaluator_rating | TEXT | Future: automated LLM rating |
-| llm_evaluator_critique | TEXT | Future: automated LLM critique |
+| llm_evaluator_rating | TEXT | 'Good' or 'Bad' set by `save_llm_review()` |
+| llm_evaluator_critique | TEXT | 2–4 sentence commentary from the LLM judge |
 | agreement | INTEGER | Future: 0 or 1 (expert vs LLM agreement) |
 | created_at | TEXT | ISO timestamp of first review |
 | updated_at | TEXT | ISO timestamp of last edit |
@@ -95,9 +103,10 @@ No foreign key constraint — reviews must outlive deleted/regenerated contexts 
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/api/contexts` | List contexts with optional filters (status, flagged, reviewed) |
+| GET | `/api/contexts` | List contexts with optional filters (status, flagged, reviewed); includes `llm_evaluator_rating` |
 | GET | `/api/contexts/{id}` | Context detail + existing review + snapshot_outdated flag |
 | PUT | `/api/contexts/{id}/review` | Submit or update expert rating and critique |
+| POST | `/api/contexts/{id}/llm-review` | Request LLM evaluation; returns `{rating, critique, updated_at}` |
 | GET | `/api/export` | Download filtered contexts as `.xlsx` for batch review |
 | POST | `/api/import` | Upload reviewed `.xlsx` to bulk-save expert ratings |
 
@@ -116,11 +125,26 @@ No foreign key constraint — reviews must outlive deleted/regenerated contexts 
 - **Import with unknown context_id** — Rows referencing a `context_id` not in the database are collected as errors and reported in the response; other rows are still processed
 - **Partial import** — Import always reports `{"imported": N, "skipped": M, "errors": [...]}` even if some rows fail; the caller sees exactly what succeeded
 
+## Environment Variables
+
+| Variable | Purpose | Fallback |
+|---|---|---|
+| `EVALUATOR_API_KEY` | LLM evaluator API key | `DEEPSEEK_API_KEY` |
+| `EVALUATOR_BASE_URL` | LLM evaluator base URL | `https://api.deepseek.com` |
+| `EVALUATOR_MODEL` | LLM evaluator model | `deepseek-v4-pro` |
+
+## Edge Cases (LLM Evaluator)
+
+- **Malformed LLM response** (no `Rating:` line) — `POST /api/contexts/{id}/llm-review` returns HTTP 502 with the raw response excerpt
+- **LLM call failure** (network error, auth, etc.) — returns HTTP 502 with the exception message
+- **User navigates away during in-flight request** — JS checks for the card element after `await`; silently drops the update if the user has already navigated elsewhere
+- **Re-run** — clicking "Re-run" after an existing rating overwrites `llm_evaluator_rating` and `llm_evaluator_critique` in the reviews table; `expert_rating` is untouched
+- **Invalid `EVALUATOR_API_KEY`** — `.env` does not support variable references; leave blank to fall back to `DEEPSEEK_API_KEY`, or copy the key value directly
+
 ## Out of Scope
 
 - Authentication / reviewer identity tracking
 - Concurrent multi-user editing
-- LLM evaluator automation (columns created but always NULL)
 - Agreement computation (column created but always NULL)
 - Pagination (not needed at current scale of ~30 contexts)
 - Mobile responsiveness
