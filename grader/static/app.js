@@ -110,6 +110,7 @@
               <th>Status</th>
               <th>Flags</th>
               <th>Review</th>
+              <th>LLM Rating</th>
             </tr>
           </thead>
           <tbody id="ctx-tbody"></tbody>
@@ -206,6 +207,9 @@
           <td>${item.expert_rating
             ? `<span class="badge badge-${esc(item.expert_rating.toLowerCase())}">${esc(item.expert_rating)}</span>`
             : `<span class="badge-none">not reviewed</span>`}</td>
+          <td>${item.llm_evaluator_rating
+            ? `<span class="badge badge-${esc(item.llm_evaluator_rating.toLowerCase())}">${esc(item.llm_evaluator_rating)}</span>`
+            : `<span class="badge-none">—</span>`}</td>
         `;
         tr.addEventListener("click", () => {
           location.hash = `#/review/${item.context_id}`;
