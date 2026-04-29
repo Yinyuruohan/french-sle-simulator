@@ -72,10 +72,10 @@ export default function DeckView() {
     setAiError('');
     setAiPreview(null);
     try {
-      const cards = aiModal === 'topic'
+      const generated = aiModal === 'topic'
         ? await aiFromTopic(aiForm.topic, aiForm.count)
         : await aiFromText(aiForm.text);
-      setAiPreview(cards);
+      setAiPreview(generated);
     } catch (e) {
       setAiError(e.message);
     } finally {
