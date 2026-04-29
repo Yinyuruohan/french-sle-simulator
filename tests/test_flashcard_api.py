@@ -83,3 +83,28 @@ def test_mastery_capped_at_3(client, deck_id):
         client.post(f'/api/cards/{cid}/mastery', json={'correct': True})
     card = client.get(f'/api/decks/{deck_id}/cards').get_json()[0]
     assert card['mastery'] == 3
+
+def test_save_and_list_sessions(client, deck_id):
+    client.post('/api/sessions', json={
+        'deck_id': deck_id, 'cards_studied': 10,
+        'correct': 8, 'incorrect': 2, 'score_pct': 80.0
+    })
+    sessions = client.get('/api/sessions').get_json()
+    assert len(sessions) == 1
+    assert sessions[0]['score_pct'] == 80.0
+
+def test_inbox_list_empty(client):
+    assert client.get('/api/inbox').get_json() == []
+
+def test_inbox_dismiss(client):
+    import sqlite3
+    import flashcard.app as fa
+    conn = sqlite3.connect(fa.DB_PATH)
+    conn.execute("INSERT INTO inbox(word,source,added_at,status) VALUES('atelier','exam','2026-01-01','pending')")
+    conn.commit()
+    conn.close()
+    rows = client.get('/api/inbox').get_json()
+    assert len(rows) == 1
+    r = client.post('/api/inbox/dismiss', json={'ids': [rows[0]['id']]})
+    assert r.status_code == 200
+    assert client.get('/api/inbox').get_json() == []

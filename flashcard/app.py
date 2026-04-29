@@ -238,6 +238,54 @@ def update_mastery(cid):
     return jsonify(dict(row))
 
 
+# ── Session routes ────────────────────────────────────────────────────────────
+
+@app.post('/api/sessions')
+def save_session():
+    b = request.get_json()
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO sessions(deck_id,cards_studied,correct,incorrect,score_pct,studied_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (b['deck_id'], b['cards_studied'], b['correct'],
+             b['incorrect'], b['score_pct'], _now())
+        )
+        sid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        row = conn.execute("SELECT * FROM sessions WHERE id=?", (sid,)).fetchone()
+    return jsonify(dict(row)), 201
+
+
+@app.get('/api/sessions')
+def list_sessions():
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM sessions ORDER BY studied_at DESC LIMIT 30"
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+# ── Inbox routes ──────────────────────────────────────────────────────────────
+
+@app.get('/api/inbox')
+def list_inbox():
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id,word,source,added_at FROM inbox "
+            "WHERE status='pending' ORDER BY added_at DESC"
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.post('/api/inbox/dismiss')
+def dismiss_inbox():
+    ids = request.get_json().get('ids', [])
+    if ids:
+        ph = ','.join('?' * len(ids))
+        with get_db() as conn:
+            conn.execute(f"UPDATE inbox SET status='dismissed' WHERE id IN ({ph})", ids)
+    return jsonify({'ok': True})
+
+
 # ── Static serving ────────────────────────────────────────────────────────────
 
 @app.route('/', defaults={'path': ''})
