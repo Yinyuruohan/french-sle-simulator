@@ -108,3 +108,43 @@ def test_inbox_dismiss(client):
     r = client.post('/api/inbox/dismiss', json={'ids': [rows[0]['id']]})
     assert r.status_code == 200
     assert client.get('/api/inbox').get_json() == []
+
+from unittest.mock import patch
+
+MOCK_CARDS = [
+    {'front': 'atelier', 'type': 'nom masc.', 'en': 'workshop', 'zh': '工作坊',
+     'example': 'Nous organisons un atelier.'}
+]
+
+def test_ai_from_topic_returns_preview(client):
+    with patch('flashcard.app._call_ai', return_value=MOCK_CARDS):
+        r = client.post('/api/ai/from-topic', json={'topic': 'government', 'count': 1, 'lang': 'French'})
+    assert r.status_code == 200
+    assert r.get_json()[0]['front'] == 'atelier'
+
+def test_ai_from_text_returns_preview(client):
+    with patch('flashcard.app._call_ai', return_value=MOCK_CARDS):
+        r = client.post('/api/ai/from-text', json={'text': 'Le ministère alloue des fonds.', 'lang': 'French'})
+    assert r.status_code == 200
+    assert len(r.get_json()) == 1
+
+def test_ai_commit_saves_to_deck(client, deck_id):
+    r = client.post('/api/ai/commit', json={'cards': MOCK_CARDS, 'deck_id': deck_id})
+    assert r.status_code == 200
+    cards = client.get(f'/api/decks/{deck_id}/cards').get_json()
+    assert len(cards) == 1
+    assert cards[0]['front'] == 'atelier'
+
+def test_inbox_generate_and_commit(client, deck_id):
+    import sqlite3
+    import flashcard.app as fa
+    conn = sqlite3.connect(fa.DB_PATH)
+    conn.execute("INSERT INTO inbox(word,source,added_at,status) VALUES('atelier','exam','2026-01-01','pending')")
+    conn.commit()
+    conn.close()
+    rows = client.get('/api/inbox').get_json()
+    with patch('flashcard.app._call_ai', return_value=MOCK_CARDS):
+        preview = client.post('/api/inbox/generate', json={'ids': [rows[0]['id']]}).get_json()
+    assert preview[0]['front'] == 'atelier'
+    client.post('/api/inbox/commit', json={'cards': preview, 'deck_id': deck_id, 'ids': [rows[0]['id']]})
+    assert client.get('/api/inbox').get_json() == []

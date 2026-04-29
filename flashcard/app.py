@@ -1,10 +1,12 @@
 import json
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
+from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from tools.model_config import load_default_configs
@@ -283,6 +285,127 @@ def dismiss_inbox():
         ph = ','.join('?' * len(ids))
         with get_db() as conn:
             conn.execute(f"UPDATE inbox SET status='dismissed' WHERE id IN ({ph})", ids)
+    return jsonify({'ok': True})
+
+
+# ── AI helper ─────────────────────────────────────────────────────────────────
+
+
+def _call_ai(prompt: str) -> list:
+    cfg = load_default_configs()['evaluate']
+    client_ai = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
+    resp = client_ai.chat.completions.create(
+        model=cfg.model,
+        messages=[
+            {'role': 'system', 'content': (
+                'You generate French vocabulary flashcards. '
+                'Always respond with a JSON array of objects with keys: '
+                'front, type, en, zh, example. No extra text.'
+            )},
+            {'role': 'user', 'content': prompt}
+        ],
+        temperature=0.7,
+        max_tokens=4096,
+    )
+    text = resp.choices[0].message.content
+    text = re.sub(r'^```[a-z]*\n?', '', text.strip())
+    text = re.sub(r'\n?```$', '', text.strip())
+    return json.loads(text)
+
+
+def _topic_prompt(topic: str, count: int, lang: str) -> str:
+    return (
+        f"Generate {count} {lang} vocabulary flashcard(s) about the topic: '{topic}'. "
+        f"Each card: front={lang} word/phrase, type=grammar type in French, "
+        f"en=English translation(s), zh=Chinese translation(s), "
+        f"example=a realistic workplace sentence using the word. "
+        f"Return a JSON array only."
+    )
+
+
+def _text_prompt(text: str, lang: str) -> str:
+    return (
+        f"Extract important {lang} vocabulary from this text and create flashcards. "
+        f"Each card: front=word/phrase as it appears, type=grammar type in French, "
+        f"en=English translation(s), zh=Chinese translation(s), "
+        f"example=a realistic workplace sentence. Return a JSON array only.\n\nText:\n{text}"
+    )
+
+
+# ── AI routes ─────────────────────────────────────────────────────────────────
+
+@app.post('/api/ai/from-topic')
+def ai_from_topic():
+    b = request.get_json()
+    try:
+        cards = _call_ai(_topic_prompt(b['topic'], b.get('count', 10), b.get('lang', 'French')))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    return jsonify(cards)
+
+
+@app.post('/api/ai/from-text')
+def ai_from_text():
+    b = request.get_json()
+    try:
+        cards = _call_ai(_text_prompt(b['text'], b.get('lang', 'French')))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    return jsonify(cards)
+
+
+@app.post('/api/ai/commit')
+def ai_commit():
+    b = request.get_json()
+    deck_id = b['deck_id']
+    now = _now()
+    with get_db() as conn:
+        for card in b.get('cards', []):
+            conn.execute(
+                "INSERT INTO cards(id,deck_id,front,type,en,zh,example,mastery,seen,created_at) "
+                "VALUES(?,?,?,?,?,?,?,0,0,?)",
+                (_uid(), deck_id, card['front'], card.get('type', ''),
+                 card.get('en', ''), card.get('zh', ''), card.get('example', ''), now)
+            )
+    return jsonify({'ok': True, 'added': len(b.get('cards', []))})
+
+
+@app.post('/api/inbox/generate')
+def inbox_generate():
+    ids = request.get_json().get('ids', [])
+    if not ids:
+        return jsonify([])
+    ph = ','.join('?' * len(ids))
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT word FROM inbox WHERE id IN ({ph})", ids
+        ).fetchall()
+    words = [r['word'] for r in rows]
+    prompt = _topic_prompt(', '.join(words), len(words), 'French')
+    try:
+        cards = _call_ai(prompt)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    return jsonify(cards)
+
+
+@app.post('/api/inbox/commit')
+def inbox_commit():
+    b = request.get_json()
+    deck_id = b['deck_id']
+    ids = b.get('ids', [])
+    now = _now()
+    with get_db() as conn:
+        for card in b.get('cards', []):
+            conn.execute(
+                "INSERT INTO cards(id,deck_id,front,type,en,zh,example,mastery,seen,created_at) "
+                "VALUES(?,?,?,?,?,?,?,0,0,?)",
+                (_uid(), deck_id, card['front'], card.get('type', ''),
+                 card.get('en', ''), card.get('zh', ''), card.get('example', ''), now)
+            )
+        if ids:
+            ph = ','.join('?' * len(ids))
+            conn.execute(f"UPDATE inbox SET status='added' WHERE id IN ({ph})", ids)
     return jsonify({'ok': True})
 
 
