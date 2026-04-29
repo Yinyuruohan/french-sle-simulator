@@ -24,7 +24,6 @@ def init_db() -> None:
                 status   TEXT NOT NULL DEFAULT 'pending'
             )
         """)
-        conn.commit()
 
 
 init_db()
@@ -40,7 +39,6 @@ def add_to_inbox(words: list, source: str = 'exam') -> None:
             "INSERT INTO inbox (word, source, added_at, status) VALUES (?, ?, ?, 'pending')",
             rows
         )
-        conn.commit()
 
 
 def get_pending_inbox() -> list:
@@ -53,6 +51,9 @@ def get_pending_inbox() -> list:
 
 
 def mark_inbox_status(ids: list, status: str) -> None:
+    _VALID_STATUSES = {'pending', 'added', 'dismissed'}
+    if status not in _VALID_STATUSES:
+        raise ValueError(f"Invalid status {status!r}; must be one of {_VALID_STATUSES}")
     if not ids:
         return
     placeholders = ','.join('?' * len(ids))
@@ -61,4 +62,3 @@ def mark_inbox_status(ids: list, status: str) -> None:
             f"UPDATE inbox SET status = ? WHERE id IN ({placeholders})",
             [status, *ids]
         )
-        conn.commit()
