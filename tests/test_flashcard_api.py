@@ -42,3 +42,44 @@ def test_delete_deck(client):
     did = r.get_json()['id']
     assert client.delete(f'/api/decks/{did}').status_code == 200
     assert client.get('/api/decks').get_json() == []
+
+@pytest.fixture
+def deck_id(client):
+    r = client.post('/api/decks', json={'name': 'D', 'src_lang': 'French', 'tgt_lang': 'EN', 'color': '1'})
+    return r.get_json()['id']
+
+def test_list_cards_empty(client, deck_id):
+    r = client.get(f'/api/decks/{deck_id}/cards')
+    assert r.status_code == 200
+    assert r.get_json() == []
+
+def test_add_card(client, deck_id):
+    r = client.post(f'/api/decks/{deck_id}/cards', json={
+        'front': 'atelier', 'type': 'nom masc.', 'en': 'workshop', 'zh': '工作坊', 'example': 'Ex.'
+    })
+    assert r.status_code == 201
+    assert r.get_json()['front'] == 'atelier'
+
+def test_update_card(client, deck_id):
+    cid = client.post(f'/api/decks/{deck_id}/cards', json={'front': 'old', 'type': '', 'en': '', 'zh': '', 'example': ''}).get_json()['id']
+    r = client.put(f'/api/cards/{cid}', json={'front': 'new', 'type': 'verbe', 'en': 'to new', 'zh': '新', 'example': 'E'})
+    assert r.get_json()['front'] == 'new'
+
+def test_delete_card(client, deck_id):
+    cid = client.post(f'/api/decks/{deck_id}/cards', json={'front': 'x', 'type': '', 'en': '', 'zh': '', 'example': ''}).get_json()['id']
+    assert client.delete(f'/api/cards/{cid}').status_code == 200
+    assert client.get(f'/api/decks/{deck_id}/cards').get_json() == []
+
+def test_mastery_correct_increments(client, deck_id):
+    cid = client.post(f'/api/decks/{deck_id}/cards', json={'front': 'x', 'type': '', 'en': '', 'zh': '', 'example': ''}).get_json()['id']
+    client.post(f'/api/cards/{cid}/mastery', json={'correct': True})
+    card = client.get(f'/api/decks/{deck_id}/cards').get_json()[0]
+    assert card['mastery'] == 1
+    assert card['seen'] == 1
+
+def test_mastery_capped_at_3(client, deck_id):
+    cid = client.post(f'/api/decks/{deck_id}/cards', json={'front': 'x', 'type': '', 'en': '', 'zh': '', 'example': ''}).get_json()['id']
+    for _ in range(5):
+        client.post(f'/api/cards/{cid}/mastery', json={'correct': True})
+    card = client.get(f'/api/decks/{deck_id}/cards').get_json()[0]
+    assert card['mastery'] == 3

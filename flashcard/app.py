@@ -172,6 +172,70 @@ def delete_deck(did):
     return jsonify({'ok': True})
 
 
+# ── Card routes ───────────────────────────────────────────────────────────────
+
+@app.get('/api/decks/<did>/cards')
+def list_cards(did):
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM cards WHERE deck_id=? ORDER BY created_at", (did,)
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.post('/api/decks/<did>/cards')
+def add_card(did):
+    b = request.get_json()
+    card = {
+        'id': _uid(), 'deck_id': did, 'front': b['front'],
+        'type': b.get('type', ''), 'en': b.get('en', ''),
+        'zh': b.get('zh', ''), 'example': b.get('example', ''),
+        'mastery': 0, 'seen': 0, 'created_at': _now()
+    }
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO cards(id,deck_id,front,type,en,zh,example,mastery,seen,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            list(card.values())
+        )
+    return jsonify(card), 201
+
+
+@app.put('/api/cards/<cid>')
+def update_card(cid):
+    b = request.get_json()
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE cards SET front=?,type=?,en=?,zh=?,example=? WHERE id=?",
+            (b['front'], b.get('type', ''), b.get('en', ''), b.get('zh', ''), b.get('example', ''), cid)
+        )
+        row = conn.execute("SELECT * FROM cards WHERE id=?", (cid,)).fetchone()
+    return jsonify(dict(row))
+
+
+@app.delete('/api/cards/<cid>')
+def delete_card(cid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM cards WHERE id=?", (cid,))
+    return jsonify({'ok': True})
+
+
+@app.post('/api/cards/<cid>/mastery')
+def update_mastery(cid):
+    correct = request.get_json().get('correct', False)
+    with get_db() as conn:
+        row = conn.execute("SELECT mastery, seen FROM cards WHERE id=?", (cid,)).fetchone()
+        if not row:
+            return jsonify({'error': 'not found'}), 404
+        new_mastery = min(3, row['mastery'] + 1) if correct else max(0, row['mastery'] - 1)
+        conn.execute(
+            "UPDATE cards SET mastery=?, seen=seen+1 WHERE id=?",
+            (new_mastery, cid)
+        )
+        row = conn.execute("SELECT * FROM cards WHERE id=?", (cid,)).fetchone()
+    return jsonify(dict(row))
+
+
 # ── Static serving ────────────────────────────────────────────────────────────
 
 @app.route('/', defaults={'path': ''})
