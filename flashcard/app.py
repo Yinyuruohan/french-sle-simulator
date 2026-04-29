@@ -210,6 +210,8 @@ def update_card(cid):
             (b['front'], b.get('type', ''), b.get('en', ''), b.get('zh', ''), b.get('example', ''), cid)
         )
         row = conn.execute("SELECT * FROM cards WHERE id=?", (cid,)).fetchone()
+    if not row:
+        return jsonify({'error': 'not found'}), 404
     return jsonify(dict(row))
 
 
