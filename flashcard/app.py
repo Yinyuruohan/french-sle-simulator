@@ -116,6 +116,62 @@ def _seed_defaults():
         conn.execute("INSERT INTO seed_meta(key,value) VALUES('decks_seeded','1')")
 
 
+# ── Deck routes ───────────────────────────────────────────────────────────────
+
+@app.get('/api/decks')
+def list_decks():
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT d.id, d.name, d.src_lang, d.tgt_lang, d.color, d.created_at,
+                   COUNT(c.id) as card_count,
+                   SUM(CASE WHEN c.mastery >= 3 THEN 1 ELSE 0 END) as mastered_count
+            FROM decks d LEFT JOIN cards c ON c.deck_id = d.id
+            GROUP BY d.id ORDER BY d.created_at
+        """).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.post('/api/decks')
+def create_deck():
+    body = request.get_json()
+    deck = {
+        'id': _uid(), 'name': body['name'],
+        'src_lang': body.get('src_lang', 'French'),
+        'tgt_lang': body.get('tgt_lang', 'English, 中文'),
+        'color': str(body.get('color', '1')),
+        'created_at': _now()
+    }
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO decks(id,name,src_lang,tgt_lang,color,created_at) VALUES(?,?,?,?,?,?)",
+            list(deck.values())
+        )
+    deck['card_count'] = 0
+    deck['mastered_count'] = 0
+    return jsonify(deck), 201
+
+
+@app.put('/api/decks/<did>')
+def update_deck(did):
+    body = request.get_json()
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE decks SET name=?, color=? WHERE id=?",
+            (body.get('name'), str(body.get('color', '1')), did)
+        )
+        row = conn.execute("SELECT * FROM decks WHERE id=?", (did,)).fetchone()
+    if not row:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify(dict(row))
+
+
+@app.delete('/api/decks/<did>')
+def delete_deck(did):
+    with get_db() as conn:
+        conn.execute("DELETE FROM decks WHERE id=?", (did,))
+    return jsonify({'ok': True})
+
+
 # ── Static serving ────────────────────────────────────────────────────────────
 
 @app.route('/', defaults={'path': ''})
