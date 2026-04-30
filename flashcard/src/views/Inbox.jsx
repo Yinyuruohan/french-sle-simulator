@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getInbox, dismissInbox, generateFromInbox, commitInbox, getDecks } from '../api.js';
 import { useToast } from '../components/Toast.jsx';
 
@@ -12,12 +12,19 @@ export default function Inbox({ onInboxChange }) {
   const [error, setError] = useState('');
   const { show, Toast } = useToast();
 
-  const load = () => {
+  const allCheckRef = useRef(null);
+  useEffect(() => {
+    if (allCheckRef.current) {
+      allCheckRef.current.indeterminate = selected.size > 0 && selected.size < rows.length;
+    }
+  }, [selected.size, rows.length]);
+
+  const load = useCallback(() => {
     getInbox().then(r => { setRows(r); onInboxChange?.(); }).catch(() => {});
     getDecks().then(d => { setDecks(d); if (d.length) setTargetDeck(d[0].id); }).catch(() => {});
-  };
+  }, [onInboxChange]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   function toggleAll(checked) {
     setSelected(checked ? new Set(rows.map(r => r.id)) : new Set());
@@ -34,10 +41,14 @@ export default function Inbox({ onInboxChange }) {
   async function handleDismiss() {
     const ids = [...selected];
     if (!ids.length) return;
-    await dismissInbox(ids);
-    setSelected(new Set());
-    load();
-    show(`${ids.length} word(s) dismissed`);
+    try {
+      await dismissInbox(ids);
+      setSelected(new Set());
+      load();
+      show(`${ids.length} word(s) dismissed`);
+    } catch (e) {
+      setError(e.message || 'Failed to dismiss words');
+    }
   }
 
   async function handleGenerate() {
@@ -59,11 +70,16 @@ export default function Inbox({ onInboxChange }) {
   async function handleCommit() {
     const ids = [...selected];
     if (!preview?.length || !targetDeck) return;
-    await commitInbox(preview, targetDeck, ids);
-    setPreview(null);
-    setSelected(new Set());
-    load();
-    show(`${preview.length} card(s) added to deck`);
+    const cardCount = preview.length;
+    try {
+      await commitInbox(preview, targetDeck, ids);
+      setPreview(null);
+      setSelected(new Set());
+      load();
+      show(`${cardCount} card(s) added to deck`);
+    } catch (e) {
+      setError(e.message || 'Failed to add cards to deck');
+    }
   }
 
   return (
@@ -73,7 +89,7 @@ export default function Inbox({ onInboxChange }) {
         <div className="topbar-actions">
           {selected.size > 0 && !preview && (
             <>
-              <button className="btn btn-danger" onClick={handleDismiss}>Dismiss ({selected.size})</button>
+              <button className="btn btn-danger" onClick={handleDismiss} disabled={loading}>Dismiss ({selected.size})</button>
               <button className="btn btn-primary" onClick={handleGenerate} disabled={loading}>
                 {loading ? 'Generating…' : `Generate cards (${selected.size})`}
               </button>
@@ -96,7 +112,7 @@ export default function Inbox({ onInboxChange }) {
               <thead>
                 <tr>
                   <th style={{ width: 36 }}>
-                    <input type="checkbox" checked={selected.size === rows.length && rows.length > 0}
+                    <input ref={allCheckRef} type="checkbox" checked={selected.size === rows.length && rows.length > 0}
                       onChange={e => toggleAll(e.target.checked)} style={{ accentColor: 'var(--sage)' }} />
                   </th>
                   <th>Word / Phrase</th>
@@ -113,7 +129,7 @@ export default function Inbox({ onInboxChange }) {
                     </td>
                     <td className="td-fr">{r.word}</td>
                     <td style={{ color: 'var(--ink-muted)', fontSize: 12 }}>{r.source}</td>
-                    <td style={{ color: 'var(--ink-muted)', fontSize: 12 }}>{r.added_at.slice(0, 10)}</td>
+                    <td style={{ color: 'var(--ink-muted)', fontSize: 12 }}>{r.added_at?.slice(0, 10) ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -149,7 +165,7 @@ export default function Inbox({ onInboxChange }) {
                 </thead>
                 <tbody>
                   {preview.map((c, i) => (
-                    <tr key={i}>
+                    <tr key={c.front ?? i}>
                       <td className="td-fr">{c.front}</td>
                       <td className="td-type">{c.type}</td>
                       <td>{c.en}</td>
