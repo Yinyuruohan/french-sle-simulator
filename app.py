@@ -1108,16 +1108,16 @@ def render_exam():
         except Exception as e:
             st.error(f"Error evaluating exam: {e}")
 
-    st.divider()
-    with st.expander("📝 Vocab Note — save unknown words to flashcard inbox"):
+    with st.sidebar:
+        st.markdown("### 📝 Vocab Note")
         note_words = st.text_area(
             "Words you don't know (one per line)",
             placeholder="atelier\nallouer\naperçu",
             key="vocab_note_input",
-            height=120,
+            height=160,
             label_visibility="collapsed"
         )
-        if st.button("Save to Flashcard Inbox", type="secondary"):
+        if st.button("Save to Flashcard Inbox", type="secondary", use_container_width=True):
             words = [w.strip() for w in note_words.splitlines() if w.strip()]
             if words:
                 add_to_inbox(words, source='exam')
