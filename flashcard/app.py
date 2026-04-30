@@ -26,6 +26,7 @@ app = Flask(__name__, static_folder=None)
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -292,7 +293,9 @@ def dismiss_inbox():
 
 
 def _call_ai(prompt: str) -> list:
-    cfg = load_default_configs()['evaluate']
+    cfg = load_default_configs()['flashcard']
+    if not cfg.api_key:
+        raise ValueError("No API key configured for flashcard AI — set FLASHCARD_API_KEY or DEEPSEEK_API_KEY in .env")
     client_ai = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
     resp = client_ai.chat.completions.create(
         model=cfg.model,
@@ -329,6 +332,19 @@ def _text_prompt(text: str, lang: str) -> str:
         f"Each card: front=word/phrase as it appears, type=grammar type in French, "
         f"en=English translation(s), zh=Chinese translation(s), "
         f"example=a realistic workplace sentence. Return a JSON array only.\n\nText:\n{text}"
+    )
+
+
+def _words_prompt(words: list, lang: str) -> str:
+    word_list = '\n'.join(f'- {w}' for w in words)
+    return (
+        f"Define each of the following specific {lang} words/phrases as vocabulary flashcards. "
+        f"Create exactly one card per word, in the same order as the list. "
+        f"Each card: front=the exact word/phrase from the list, type=grammar type in French, "
+        f"en=English translation(s), zh=Chinese translation(s), "
+        f"example=a realistic Canadian federal workplace sentence using that word. "
+        f"Return a JSON array with exactly {len(words)} objects. No extra text.\n\n"
+        f"Words to define:\n{word_list}"
     )
 
 
@@ -381,7 +397,7 @@ def inbox_generate():
             f"SELECT word FROM inbox WHERE id IN ({ph})", ids
         ).fetchall()
     words = [r['word'] for r in rows]
-    prompt = _topic_prompt(', '.join(words), len(words), 'French')
+    prompt = _words_prompt(words, 'French')
     try:
         cards = _call_ai(prompt)
     except Exception as e:
@@ -421,5 +437,6 @@ def serve_spa(path):
 
 
 if __name__ == '__main__':
+    import os as _os
     init_db()
-    app.run(port=5002, debug=True)
+    app.run(port=5002, debug=_os.environ.get("FLASK_DEBUG", "0") == "1")

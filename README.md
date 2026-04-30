@@ -50,16 +50,14 @@ french_sle_simulator/
 │       ├── style.css                # Grader styles (Plus Jakarta Sans, blue palette)
 │       └── app.js                   # Vanilla JS: API calls, view rendering, filter state
 ├── flashcard/
-│   ├── app.py                       # Flask server: REST API + Vite SPA serving (port 5002)
-│   ├── flashcard_api.py             # API routes: decks, cards, inbox, study sessions
-│   ├── flashcard_db.py              # SQLite schema + CRUD for decks, cards, inbox, sessions
+│   ├── app.py                       # Flask server: all REST routes + SQLite schema + Vite SPA (port 5002)
 │   ├── context/
 │   │   └── lexique-backup-*.json    # Seed vocabulary (loaded on first run)
 │   ├── src/                         # React 18 + Vite 5 SPA source
 │   │   ├── main.jsx                 # Entry point + HashRouter + layout
 │   │   └── views/
-│   │       ├── Decks.jsx            # Deck list + create/delete
-│   │       ├── Cards.jsx            # Card list + add/edit/delete
+│   │       ├── Dashboard.jsx        # Deck grid + create/delete decks
+│   │       ├── DeckView.jsx         # Card table + add/edit/delete cards within a deck
 │   │       ├── Inbox.jsx            # Vocab inbox: AI generate → review → commit
 │   │       ├── StudySession.jsx     # Flip / MCQ / type-in modes + session tracking
 │   │       └── Progress.jsx         # Mastery bars + session history
@@ -167,8 +165,8 @@ A standalone expert review interface that lets subject-matter experts rate and a
 
 ```bash
 python grader/app.py           # default port 5001
-GRADER_PORT=5002 python grader/app.py   # override via env var
-python grader/app.py --port 5002        # override via CLI flag
+GRADER_PORT=5003 python grader/app.py   # override via env var (note: 5002 is reserved for flashcard)
+python grader/app.py --port 5003        # override via CLI flag
 ```
 
 **Architecture:** Flask backend with `create_app()` factory, REST API under `/api/*`, vanilla JS SPA frontend served at `/`. Shares `question_bank.db` with the Streamlit simulator; writes only to the `reviews` table.

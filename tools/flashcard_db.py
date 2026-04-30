@@ -9,6 +9,7 @@ DB_PATH = Path(__file__).parent.parent / 'flashcard' / 'flashcard.db'
 def _connect():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -26,10 +27,8 @@ def init_db() -> None:
         """)
 
 
-init_db()
-
-
 def add_to_inbox(words: list, source: str = 'exam') -> None:
+    init_db()
     now = datetime.now(timezone.utc).isoformat()
     rows = [(w.strip(), source, now) for w in words if w.strip()]
     if not rows:

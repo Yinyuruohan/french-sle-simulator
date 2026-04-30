@@ -38,16 +38,14 @@ grader/
     style.css             # Grader styles (Plus Jakarta Sans, blue palette)
     app.js                # Vanilla JS: API calls, view rendering, state management
 flashcard/
-  app.py                  # Flask server: REST API + Vite SPA serving (port 5002)
-  flashcard_api.py        # API routes: decks, cards, inbox, study sessions
-  flashcard_db.py         # SQLite schema init + deck/card/inbox/session CRUD
+  app.py                  # Flask server: all REST routes + SQLite schema + Vite SPA serving (port 5002)
   context/
     lexique-backup-*.json # Seed vocabulary JSON (loaded on first run)
   src/                    # React 18 + Vite 5 SPA source
     main.jsx              # App entry + HashRouter + layout
     views/
-      Decks.jsx           # Deck list + create/delete
-      Cards.jsx           # Card list + add/edit/delete
+      Dashboard.jsx       # Deck grid + create/delete decks
+      DeckView.jsx        # Card table + add/edit/delete cards within a deck
       Inbox.jsx           # Vocab inbox: AI generate → review → commit to deck
       StudySession.jsx    # Study modes: flip, MCQ, type-in; session tracking
       Progress.jsx        # Mastery bars + session history
@@ -102,8 +100,8 @@ Exams use a **contexts → questions** structure:
 
 ## Key Technical Details
 
-- **AI Engine:** Any OpenAI-compatible endpoint via `openai` Python SDK. Default: DeepSeek (`base_url="https://api.deepseek.com"`, model `deepseek-v4-pro`). Per-tool overrides via `GENERATE_*`, `EVALUATE_*`, `REVIEW_*`, `EVALUATOR_*` env vars or the in-app "AI model settings" expander. `tools/model_config.py` is the single source of truth.
-- **Flashcard app:** `flashcard/app.py` — Flask 3 server on port 5002 serving a React 18 + Vite 5 SPA (HashRouter). `flashcard/flashcard_db.py` owns all SQLite schema and CRUD for decks, cards, inbox, and study sessions. `tools/flashcard_db.py` is a lightweight shared helper (just `add_to_inbox()`) that lets `app.py` write vocab words to `flashcard/flashcard.db` without importing Flask. The Vite build output (`flashcard/static/dist/`) is committed so the server works with no Node.js tooling in production.
+- **AI Engine:** Any OpenAI-compatible endpoint via `openai` Python SDK. Default: DeepSeek (`base_url="https://api.deepseek.com"`, model `deepseek-v4-pro`). Per-tool overrides via `GENERATE_*`, `EVALUATE_*`, `REVIEW_*`, `EVALUATOR_*`, `FLASHCARD_*` env vars or the in-app "AI model settings" expander. `tools/model_config.py` is the single source of truth.
+- **Flashcard app:** `flashcard/app.py` — Flask 3 server on port 5002. All REST routes, SQLite schema (`decks`, `cards`, `sessions`, `inbox`, `seed_meta`), and the React 18 + Vite 5 SPA serving (HashRouter) live in this single file. `tools/flashcard_db.py` is a lightweight shared helper (just `add_to_inbox()`, with lazy `init_db()` on first call) that lets `app.py` write vocab words to `flashcard/flashcard.db` without importing Flask. The flashcard AI uses `FLASHCARD_*` env vars (falls back to `DEEPSEEK_API_KEY` + `deepseek-v4-pro`). The Vite build output (`flashcard/static/dist/`) is committed so the server works with no Node.js tooling in production.
 - **LLM Evaluator:** `tools/llm_evaluator.py` — `evaluate_context(context_data, model_config)` calls the LLM judge (`LLM_judge_prompt.md` as system prompt) and returns `{"rating": "Good"|"Bad", "critique": "..."}`. Configured via `EVALUATOR_*` env vars (falls back to `DEEPSEEK_API_KEY` + `deepseek-v4-pro`). Uses `max_tokens=4096` to accommodate reasoning model chain-of-thought overhead.
 - **Exam generation:** Single API call produces questions AND explanations (why_correct + grammar_rule), JSON response format, temperature 0.7, max_tokens 16000. ~50% fill-in-blank, ~50% error identification, 2-20 questions. Prompt enforces broad grammar coverage: 11 real SLE topics, no topic repeated more than twice. Explanations must not reference option letters (shuffled post-generation). Post-generation option shuffling randomizes A/B/C/D for fill-in-blank questions; error identification options are never shuffled.
 - **Evaluation:** Fully deterministic — no API call. Scores answers against the answer key and displays pre-generated explanations from exam data.
