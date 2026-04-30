@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getCards, updateMastery, saveSessions } from '../api.js';
 
@@ -46,15 +46,13 @@ function FlipCard({ card, onAnswer }) {
 // ── MCQ mode ──────────────────────────────────────────────────────────────────
 function MCQCard({ card, allCards, onAnswer }) {
   const [selected, setSelected] = useState(null);
-  const choices = useRef([]);
-
-  if (choices.current.length === 0) {
+  const choices = useMemo(() => {
     const others = shuffle(allCards.filter(c => c.id !== card.id)).slice(0, 3);
-    choices.current = shuffle([card, ...others]);
-  }
+    return shuffle([card, ...others]);
+  }, [card.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function pick(c) {
-    if (selected) return;
+    if (selected !== null) return;
     setSelected(c.id);
     setTimeout(() => onAnswer(c.id === card.id), 1000);
   }
@@ -66,14 +64,14 @@ function MCQCard({ card, allCards, onAnswer }) {
       </div>
       <div className="study-front">{card.front}</div>
       <div className="study-type" style={{ marginBottom: 24 }}>{card.type}</div>
-      {choices.current.map((c, i) => {
+      {choices.map((c, i) => {
         let cls = 'mcq-choice';
-        if (selected) {
+        if (selected !== null) {
           if (c.id === card.id) cls += ' correct';
           else if (c.id === selected) cls += ' wrong';
         }
         return (
-          <button key={c.id} className={cls} onClick={() => pick(c)} disabled={!!selected}>
+          <button key={c.id} className={cls} onClick={() => pick(c)} disabled={selected !== null}>
             <span className="choice-key">{['A','B','C','D'][i]}</span>
             <span>{c.en}</span>
           </button>
@@ -153,6 +151,8 @@ export default function StudySession() {
   const [correct, setCorrect] = useState(0);
   const [incorrect, setIncorrect] = useState(0);
   const [done, setDone] = useState(false);
+  const correctRef = useRef(0);
+  const incorrectRef = useRef(0);
 
   useEffect(() => { getCards(id).then(setCards).catch(() => {}); }, [id]);
 
@@ -162,6 +162,8 @@ export default function StudySession() {
     setIdx(0);
     setCorrect(0);
     setIncorrect(0);
+    correctRef.current = 0;
+    incorrectRef.current = 0;
     setDone(false);
     setMode(m);
   }
@@ -169,14 +171,18 @@ export default function StudySession() {
   async function handleAnswer(wasCorrect) {
     const card = queue[idx];
     await updateMastery(card.id, wasCorrect).catch(() => {});
-    if (wasCorrect) setCorrect(c => c + 1);
-    else setIncorrect(c => c + 1);
+    if (wasCorrect) { correctRef.current += 1; setCorrect(correctRef.current); }
+    else { incorrectRef.current += 1; setIncorrect(incorrectRef.current); }
 
     if (idx + 1 >= queue.length) {
       const total = idx + 1;
-      const c = wasCorrect ? correct + 1 : correct;
-      const inc = wasCorrect ? incorrect : incorrect + 1;
-      await saveSessions({ deck_id: id, cards_studied: total, correct: c, incorrect: inc, score_pct: Math.round(c / total * 100) }).catch(() => {});
+      await saveSessions({
+        deck_id: id,
+        cards_studied: total,
+        correct: correctRef.current,
+        incorrect: incorrectRef.current,
+        score_pct: Math.round(correctRef.current / total * 100),
+      }).catch(() => {});
       setDone(true);
     } else {
       setIdx(i => i + 1);
@@ -196,9 +202,11 @@ export default function StudySession() {
             <button className="btn" style={{ width: 240, justifyContent: 'center', padding: '14px 20px', fontSize: 15 }} onClick={() => startStudy('flip')}>
               🃏 Flashcard flip
             </button>
-            <button className="btn" style={{ width: 240, justifyContent: 'center', padding: '14px 20px', fontSize: 15 }} onClick={() => startStudy('mcq')}>
-              ☑ Multiple choice
-            </button>
+            {cards.length >= 4 && (
+              <button className="btn" style={{ width: 240, justifyContent: 'center', padding: '14px 20px', fontSize: 15 }} onClick={() => startStudy('mcq')}>
+                ☑ Multiple choice
+              </button>
+            )}
             {cards.length >= 2 && (
               <button className="btn" style={{ width: 240, justifyContent: 'center', padding: '14px 20px', fontSize: 15 }} onClick={() => startStudy('type')}>
                 ✎ Type the answer
