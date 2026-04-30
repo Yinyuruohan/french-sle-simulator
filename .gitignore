@@ -60,5 +60,6 @@ Thumbs.db
 # Flashcard app
 flashcard/flashcard.db
 flashcard/node_modules/
+flashcard/context/
 # dist/ above is a Python rule; Vite build output must be committed for Flask to serve the SPA
 !flashcard/static/dist/
