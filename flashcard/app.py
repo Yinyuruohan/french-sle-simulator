@@ -433,7 +433,7 @@ def serve_spa(path):
     target = STATIC_DIR / path
     if path and target.is_file():
         return send_from_directory(STATIC_DIR, path)
-    return send_file(STATIC_DIR / 'index.html')
+    return send_from_directory(STATIC_DIR, 'index.html')
 
 
 if __name__ == '__main__':
