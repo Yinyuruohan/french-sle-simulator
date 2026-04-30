@@ -36,9 +36,9 @@ export default function Progress() {
             <div className="progress-card-title">Recent sessions</div>
             {sessions.slice(0, 10).map(s => (
               <div key={s.id} className="history-item">
-                <span className="history-date">{s.studied_at.slice(0, 10)}</span>
+                <span className="history-date">{s.studied_at?.slice(0, 10) ?? '—'}</span>
                 <span style={{ color: 'var(--ink-muted)', fontSize: 13 }}>{s.cards_studied} cards</span>
-                <span className="history-score">{s.score_pct}%</span>
+                <span className="history-score">{Math.round(s.score_pct)}%</span>
               </div>
             ))}
             {sessions.length === 0 && <p style={{ color: 'var(--ink-muted)', fontSize: 13 }}>No sessions yet.</p>}
