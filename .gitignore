@@ -1,3 +1,6 @@
+# Git worktrees
+.worktrees/
+
 # Environment and credentials
 .env
 credentials.json
@@ -53,3 +56,10 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+
+# Flashcard app
+flashcard/flashcard.db
+flashcard/node_modules/
+flashcard/context/
+# dist/ above is a Python rule; Vite build output must be committed for Flask to serve the SPA
+!flashcard/static/dist/

@@ -37,7 +37,7 @@ Then open the URL shown in the terminal (typically `http://localhost:8501`).
 
 ## Workflow Steps
 
-1. **Welcome screen** — User clicks "Start a writing exam"
+1. **Welcome screen** — User clicks "Start a writing exam". A "📚 Flashcard Study" link button is displayed beside the start button, opening the Flashcard Study app at `http://localhost:5002` in a new tab.
 2. **Setup** — User selects number of questions (2–20); optionally expands "AI model settings" to override the model/endpoint/key for any tool independently. Displays question bank stats (including warned count) and a "Pre-fill bank" button.
 3. **Cache check** — `assemble_exam_from_cache()` checks the question bank:
    - Sufficient cache → assembles exam instantly, skips generation and review
@@ -61,7 +61,7 @@ Then open the URL shown in the terminal (typically `http://localhost:8501`).
    - Contexts with warnings are cached as `warned`; clean contexts are cached as `reviewed`
    - All flagged issues (critical and warning) logged to `system_error_tracking.md`
    - Temperature: 0.1 (strict, consistent review)
-6. **Exam** — Questions displayed with radio buttons. Warning banner shown if exam contains `warned` contexts. Per-context "Flag quality issue" expander lets users report problems.
+6. **Exam** — Questions displayed with radio buttons. Warning banner shown if exam contains `warned` contexts. Per-context "Flag quality issue" expander lets users report problems. A **Vocab Note** panel is permanently visible in the left sidebar — users can type unknown words (one per line) and click "Save to Flashcard Inbox" to write them directly to `flashcard/flashcard.db` via `tools/flashcard_db.py:add_to_inbox()`. The Vocab Note sidebar persists through exam submission and remains visible on the results screen.
 7. **Submission** — User submits answers
 8. **Evaluation** — Fully deterministic, no API call needed:
    - Deterministic scoring against answer key

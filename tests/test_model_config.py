@@ -17,11 +17,11 @@ def test_modelconfig_stores_fields():
     assert cfg.model == "m"
 
 
-def test_load_default_configs_returns_three_keys(monkeypatch):
-    """load_default_configs returns generate, evaluate, review keys."""
+def test_load_default_configs_returns_four_keys(monkeypatch):
+    """load_default_configs returns generate, evaluate, review, flashcard keys."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     configs = load_default_configs()
-    assert set(configs.keys()) == {"generate", "evaluate", "review"}
+    assert set(configs.keys()) == {"generate", "evaluate", "review", "flashcard"}
 
 
 def test_load_default_configs_falls_back_to_deepseek_key(monkeypatch):

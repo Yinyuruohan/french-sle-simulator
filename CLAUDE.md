@@ -7,13 +7,15 @@ You're working on the **French SLE Written Expression Simulator** — an AI-powe
 This app generates realistic French SLE Written Expression exam questions via a configurable AI API (default: DeepSeek), presents them through a Streamlit web UI, grades answers, provides grammar feedback, and tracks errors for review.
 
 **Key entry points:**
-- `streamlit run app.py` — launches the web UI
+- `streamlit run app.py` — launches the web UI (port 8501)
 - `python grader/app.py` — launches the LLM Grader expert review interface (port 5001)
+- `python flashcard/app.py` — launches the Flashcard Study app (port 5002)
 - `tools/model_config.py` — `ModelConfig` dataclass + `load_default_configs()`; single source of truth for AI model settings
 - `tools/generate_exam.py` — generates exam questions (AI API)
 - `tools/evaluate_exam.py` — grades answers and displays pre-generated feedback (no AI API)
 - `tools/review_exam.py` — validates exam quality and feedback accuracy (AI API)
 - `tools/question_bank.py` — SQLite question bank: cache validated contexts, assemble instant exams
+- `tools/flashcard_db.py` — shared inbox helper; lets `app.py` write vocab words to `flashcard/flashcard.db` without requiring the flashcard server to be running
 - `workflows/sle_exam_simulator.md` — full SOP for the exam workflow
 
 ## The WAT Architecture
@@ -35,6 +37,20 @@ grader/
     index.html            # SPA entry point (list + detail views, hash-based routing)
     style.css             # Grader styles (Plus Jakarta Sans, blue palette)
     app.js                # Vanilla JS: API calls, view rendering, state management
+flashcard/
+  app.py                  # Flask server: all REST routes + SQLite schema + Vite SPA serving (port 5002)
+  context/
+    lexique-backup-*.json # Seed vocabulary JSON (loaded on first run)
+  src/                    # React 18 + Vite 5 SPA source
+    main.jsx              # App entry + HashRouter + layout
+    views/
+      Dashboard.jsx       # Deck grid + create/delete decks
+      DeckView.jsx        # Card table + add/edit/delete cards within a deck
+      Inbox.jsx           # Vocab inbox: AI generate → review → commit to deck
+      StudySession.jsx    # Study modes: flip, MCQ, type-in; session tracking
+      Progress.jsx        # Mastery bars + session history
+  static/dist/            # Vite build output (committed; served by Flask)
+  flashcard.db            # SQLite database (gitignored, auto-created)
 tools/
   model_config.py         # ModelConfig dataclass + load_default_configs(); per-tool AI model settings
   generate_exam.py        # AI API call to generate contexts→questions with A/B/C/D
@@ -42,6 +58,7 @@ tools/
   review_exam.py          # Conservative QA review of exam questions and feedback explanations
   question_bank.py        # SQLite question bank: cache, assemble, prefill
   grader_db.py            # Reviews table: init, CRUD, filtered queries, staleness detection
+  flashcard_db.py         # Shared inbox helper: add_to_inbox(); writes to flashcard/flashcard.db
   llm_evaluator.py        # LLM judge: evaluate_context() rates a context Good/Bad with critique
 LLM_judge_prompt.md       # System prompt for the LLM evaluator judge (SLE criteria + output format)
 tests/
@@ -83,7 +100,8 @@ Exams use a **contexts → questions** structure:
 
 ## Key Technical Details
 
-- **AI Engine:** Any OpenAI-compatible endpoint via `openai` Python SDK. Default: DeepSeek (`base_url="https://api.deepseek.com"`, model `deepseek-v4-pro`). Per-tool overrides via `GENERATE_*`, `EVALUATE_*`, `REVIEW_*`, `EVALUATOR_*` env vars or the in-app "AI model settings" expander. `tools/model_config.py` is the single source of truth.
+- **AI Engine:** Any OpenAI-compatible endpoint via `openai` Python SDK. Default: DeepSeek (`base_url="https://api.deepseek.com"`, model `deepseek-v4-pro`). Per-tool overrides via `GENERATE_*`, `EVALUATE_*`, `REVIEW_*`, `EVALUATOR_*`, `FLASHCARD_*` env vars or the in-app "AI model settings" expander. `tools/model_config.py` is the single source of truth.
+- **Flashcard app:** `flashcard/app.py` — Flask 3 server on port 5002. All REST routes, SQLite schema (`decks`, `cards`, `sessions`, `inbox`, `seed_meta`), and the React 18 + Vite 5 SPA serving (HashRouter) live in this single file. `tools/flashcard_db.py` is a lightweight shared helper (just `add_to_inbox()`, with lazy `init_db()` on first call) that lets `app.py` write vocab words to `flashcard/flashcard.db` without importing Flask. The flashcard AI uses `FLASHCARD_*` env vars (falls back to `DEEPSEEK_API_KEY` + `deepseek-v4-pro`). The Vite build output (`flashcard/static/dist/`) is committed so the server works with no Node.js tooling in production.
 - **LLM Evaluator:** `tools/llm_evaluator.py` — `evaluate_context(context_data, model_config)` calls the LLM judge (`LLM_judge_prompt.md` as system prompt) and returns `{"rating": "Good"|"Bad", "critique": "..."}`. Configured via `EVALUATOR_*` env vars (falls back to `DEEPSEEK_API_KEY` + `deepseek-v4-pro`). Uses `max_tokens=4096` to accommodate reasoning model chain-of-thought overhead.
 - **Exam generation:** Single API call produces questions AND explanations (why_correct + grammar_rule), JSON response format, temperature 0.7, max_tokens 16000. ~50% fill-in-blank, ~50% error identification, 2-20 questions. Prompt enforces broad grammar coverage: 11 real SLE topics, no topic repeated more than twice. Explanations must not reference option letters (shuffled post-generation). Post-generation option shuffling randomizes A/B/C/D for fill-in-blank questions; error identification options are never shuffled.
 - **Evaluation:** Fully deterministic — no API call. Scores answers against the answer key and displays pre-generated explanations from exam data.

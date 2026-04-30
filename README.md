@@ -2,7 +2,7 @@
 
 An AI-powered practice tool for the Canadian federal Public Service Commission's **Second Language Evaluation (SLE) — Test of Written Expression**. Generates realistic exam questions, grades answers, and provides detailed French grammar feedback.
 
-Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compatible AI endpoint (default: DeepSeek) and Streamlit as the web UI. Includes a standalone **LLM Grader** expert review interface for quality-assuring AI-generated content.
+Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compatible AI endpoint (default: DeepSeek) and Streamlit as the web UI. Includes a standalone **LLM Grader** expert review interface for quality-assuring AI-generated content, and a **Flashcard Study app** for drilling vocabulary encountered during exam practice.
 
 ## Features
 
@@ -31,6 +31,11 @@ Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compa
 - **System QA tracking** — logs all review-flagged issues to `system_error_tracking.md`
 - **LLM Grader** — standalone expert review interface for subject-matter experts to rate and annotate AI-generated exam content before it reaches learners
 - **Batch Excel export/import** — download the current filtered view as `.xlsx`, edit ratings in Excel (with Good/Bad dropdown), and upload back to bulk-update reviews
+- **Flashcard Study app** — vocabulary drill companion (port 5002):
+  - Vocab inbox: save unknown words directly from the exam's sidebar Vocab Note → AI generates front/back definitions → review and commit to a deck
+  - Three study modes: flip cards, multiple-choice (MCQ), and type-in
+  - Mastery tracking with progress bars and per-session history
+  - React 18 + Vite SPA served by Flask; same design language as the exam simulator
 
 ## Project Structure
 
@@ -44,13 +49,27 @@ french_sle_simulator/
 │       ├── index.html               # SPA entry point (hash-based routing: list + detail views)
 │       ├── style.css                # Grader styles (Plus Jakarta Sans, blue palette)
 │       └── app.js                   # Vanilla JS: API calls, view rendering, filter state
+├── flashcard/
+│   ├── app.py                       # Flask server: all REST routes + SQLite schema + Vite SPA (port 5002)
+│   ├── context/
+│   │   └── lexique-backup-*.json    # Seed vocabulary (loaded on first run)
+│   ├── src/                         # React 18 + Vite 5 SPA source
+│   │   ├── main.jsx                 # Entry point + HashRouter + layout
+│   │   └── views/
+│   │       ├── Dashboard.jsx        # Deck grid + create/delete decks
+│   │       ├── DeckView.jsx         # Card table + add/edit/delete cards within a deck
+│   │       ├── Inbox.jsx            # Vocab inbox: AI generate → review → commit
+│   │       ├── StudySession.jsx     # Flip / MCQ / type-in modes + session tracking
+│   │       └── Progress.jsx         # Mastery bars + session history
+│   └── static/dist/                 # Vite build output (committed, served by Flask)
 ├── tools/
 │   ├── model_config.py              # ModelConfig dataclass + load_default_configs() — model settings
 │   ├── generate_exam.py             # AI API: generate exam questions + explanations + option shuffling
 │   ├── evaluate_exam.py             # Deterministic grading using pre-generated explanations
 │   ├── review_exam.py               # AI API: unified QA review of questions and explanations
 │   ├── question_bank.py             # SQLite question bank: cache, assemble, prefill, flag
-│   └── grader_db.py                 # Reviews table: init, CRUD, filtered queries, staleness detection
+│   ├── grader_db.py                 # Reviews table: init, CRUD, filtered queries, staleness detection
+│   └── flashcard_db.py              # Shared inbox helper: add_to_inbox() writes to flashcard/flashcard.db
 ├── tests/
 │   ├── test_model_config.py         # Tests for model_config.py (6 tests)
 │   ├── test_generate_exam.py        # Tests for generate_exam.py (3 tests)
@@ -99,6 +118,12 @@ french_sle_simulator/
    ```
    Open **http://localhost:5001** in your browser.
 
+5. **Run the Flashcard Study app** (optional — vocabulary drill companion):
+   ```bash
+   python flashcard/app.py
+   ```
+   Open **http://localhost:5002** in your browser. The database and seed vocabulary are created automatically on first run.
+
 ## How It Works
 
 1. **Setup** — choose the number of questions (2-20); optionally configure model settings
@@ -140,8 +165,8 @@ A standalone expert review interface that lets subject-matter experts rate and a
 
 ```bash
 python grader/app.py           # default port 5001
-GRADER_PORT=5002 python grader/app.py   # override via env var
-python grader/app.py --port 5002        # override via CLI flag
+GRADER_PORT=5003 python grader/app.py   # override via env var (note: 5002 is reserved for flashcard)
+python grader/app.py --port 5003        # override via CLI flag
 ```
 
 **Architecture:** Flask backend with `create_app()` factory, REST API under `/api/*`, vanilla JS SPA frontend served at `/`. Shares `question_bank.db` with the Streamlit simulator; writes only to the `reviews` table.
@@ -164,12 +189,14 @@ python grader/app.py --port 5002        # override via CLI flag
 
 ## Tech Stack
 
-- **AI Engine:** Any OpenAI-compatible endpoint (default: DeepSeek `deepseek-chat`); configurable per tool
-- **Web UI:** Streamlit (exam simulator) + Flask + vanilla JS SPA (LLM Grader)
-- **Database:** SQLite (question bank + reviews)
+- **AI Engine:** Any OpenAI-compatible endpoint (default: DeepSeek `deepseek-v4-pro`); configurable per tool
+- **Exam Simulator UI:** Streamlit (port 8501)
+- **LLM Grader UI:** Flask + vanilla JS SPA (port 5001)
+- **Flashcard UI:** Flask + React 18 + Vite 5 + react-router-dom v6 SPA (port 5002)
+- **Database:** SQLite (question bank + reviews + flashcard decks/sessions)
 - **Framework:** WAT (Workflows, Agents, Tools)
-- **Language:** Python 3.10+
-- **Tests:** pytest (84 tests across 6 test modules)
+- **Language:** Python 3.10+, Node.js 18+ (build only; Vite output committed)
+- **Tests:** pytest (89 tests across 7 test modules)
 
 ## Disclaimer
 
