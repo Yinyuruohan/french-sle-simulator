@@ -791,15 +791,18 @@ def render_welcome():
 
     st.markdown("")
 
-    if st.button("Start a writing exam / Commencer un examen d'écriture", type="primary", use_container_width=True):
-        go_to("setup")
-        st.rerun()
-
-    st.link_button(
-        "📚 Flashcard Study",
-        "http://localhost:5002",
-        help="Open the Lexique vocabulary flashcard app"
-    )
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        if st.button("Start a writing exam / Commencer un examen d'écriture", type="primary", use_container_width=True):
+            go_to("setup")
+            st.rerun()
+    with col2:
+        st.link_button(
+            "📚 Flashcard Study",
+            "http://localhost:5002",
+            help="Open the Lexique vocabulary flashcard app",
+            use_container_width=True,
+        )
 
 
 # ── Setup ────────────────────────────────────────────────────────────────────
