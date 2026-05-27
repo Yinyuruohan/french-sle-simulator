@@ -136,3 +136,54 @@ def test_breakdown_populated_when_n_4_or_more():
     assert by_family["title"]["correct"] == 2
     assert by_family["title"]["total"] == 2
     assert by_family["title"]["pct"] == 100.0
+
+
+import os
+import tempfile
+
+
+def test_feedback_markdown_written(monkeypatch, tmp_path):
+    """grade_reading_exam writes a feedback markdown file under TMP_DIR."""
+    import tools.grade_reading_exam as g
+    monkeypatch.setattr(g, "TMP_DIR", str(tmp_path))
+    monkeypatch.setattr(g, "TRACKING_FILE", str(tmp_path / "user_error_tracking.md"))
+
+    exam = _make_exam(2)
+    exam["session_id"] = "reading_20260526_120000"
+    g.grade_reading_exam(exam, {1: "A", 2: "B"})
+
+    md_path = tmp_path / "reading_feedback_20260526_120000.md"
+    assert md_path.exists()
+    text = md_path.read_text(encoding="utf-8")
+    assert "SLE Reading Comprehension" in text
+    assert "Reason 1." in text
+    assert "Reason 2." in text
+    assert "INCORRECT" in text  # Q2 is wrong
+    assert "CORRECT" in text  # Q1 is right
+
+
+def test_tracking_file_appended_with_mode_marker(monkeypatch, tmp_path):
+    """Incorrect items are logged to user_error_tracking.md with the RC mode marker."""
+    import tools.grade_reading_exam as g
+    monkeypatch.setattr(g, "TMP_DIR", str(tmp_path))
+    monkeypatch.setattr(g, "TRACKING_FILE", str(tmp_path / "user_error_tracking.md"))
+
+    exam = _make_exam(1)
+    g.grade_reading_exam(exam, {1: "B"})  # wrong
+
+    tracking = (tmp_path / "user_error_tracking.md").read_text(encoding="utf-8")
+    assert "**Mode:** Reading Comprehension" in tracking
+    assert "**Stem family:** main_idea" in tracking
+    assert "**Justification:**" in tracking
+
+
+def test_tracking_file_not_touched_when_all_correct(monkeypatch, tmp_path):
+    """No tracking write when all answers are correct."""
+    import tools.grade_reading_exam as g
+    monkeypatch.setattr(g, "TMP_DIR", str(tmp_path))
+    monkeypatch.setattr(g, "TRACKING_FILE", str(tmp_path / "user_error_tracking.md"))
+
+    exam = _make_exam(2)
+    g.grade_reading_exam(exam, {1: "A", 2: "A"})
+
+    assert not (tmp_path / "user_error_tracking.md").exists()
