@@ -13,14 +13,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.generate_reading_exam import generate_reading_exam
 from tools.grade_reading_exam import grade_reading_exam
 from tools.model_config import load_default_configs
-from app import _inject_design_system
+from tools.streamlit_design import inject_design_system
 
 st.set_page_config(
     page_title="SLE Reading Comprehension",
     page_icon="📖",
     layout="wide",
 )
-_inject_design_system()
+inject_design_system()
 
 
 def _render_taking():
