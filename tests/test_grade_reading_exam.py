@@ -2,6 +2,14 @@
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_grader_writes(monkeypatch, tmp_path):
+    """Redirect TMP_DIR and TRACKING_FILE so tests don't write to the real files."""
+    import tools.grade_reading_exam as g
+    monkeypatch.setattr(g, "TMP_DIR", str(tmp_path))
+    monkeypatch.setattr(g, "TRACKING_FILE", str(tmp_path / "user_error_tracking.md"))
+
+
 def _make_exam(num=2):
     """Helper: minimal RC exam with `num` items."""
     return {
