@@ -23,6 +23,103 @@ st.set_page_config(
 _inject_design_system()
 
 
+def _render_taking():
+    exam = st.session_state.rc_exam
+    st.title("📖 Reading Comprehension")
+    st.caption(f"Session: {exam['session_id']} · {exam['num_questions']} questions")
+
+    for ctx in exam["contexts"]:
+        st.markdown(f"### Passage {ctx['context_id']}")
+        st.markdown(f"> *{ctx['passage']}*")
+        q = ctx["questions"][0]
+        st.markdown(f"**Question {q['question_id']}.** {q['question_text']}")
+        choices = [f"{letter}. {q['options'][letter]}" for letter in ["A", "B", "C", "D"]]
+        prev = st.session_state.rc_answers.get(q["question_id"])
+        try:
+            idx = ["A", "B", "C", "D"].index(prev) if prev else None
+        except ValueError:
+            idx = None
+        choice = st.radio(
+            label=f"Your answer for question {q['question_id']}",
+            options=choices,
+            index=idx,
+            key=f"rc_q_{q['question_id']}",
+            label_visibility="collapsed",
+        )
+        if choice is not None:
+            st.session_state.rc_answers[q["question_id"]] = choice.split(".", 1)[0]
+        st.divider()
+
+    missing = [
+        ctx["questions"][0]["question_id"]
+        for ctx in exam["contexts"]
+        if ctx["questions"][0]["question_id"] not in st.session_state.rc_answers
+    ]
+    submit_label = (
+        f"Submit ({len(missing)} unanswered — will count as wrong)"
+        if missing
+        else "Submit answers"
+    )
+    if st.button(submit_label, type="primary"):
+        _go_to("evaluating")
+        st.rerun()
+
+
+def _render_evaluating():
+    with st.spinner("Grading your answers…"):
+        evaluation = grade_reading_exam(st.session_state.rc_exam, st.session_state.rc_answers)
+    st.session_state.rc_evaluation = evaluation
+    _go_to("results")
+    st.rerun()
+
+
+def _render_results():
+    ev = st.session_state.rc_evaluation
+    st.title("📖 Results / Résultats")
+    cols = st.columns(3)
+    cols[0].metric("Score", f"{ev['score']} / {ev['total']}")
+    cols[1].metric("Percentage", f"{ev['percentage']}%")
+    cols[2].metric("Level / Niveau", ev["level"])
+    st.caption("C ≥ 90% · B ≥ 70% · A ≥ 50% · Below A < 50% (unofficial estimate)")
+
+    for ctx_r in ev["context_results"]:
+        st.markdown(f"### Passage {ctx_r['context_id']}")
+        st.markdown(f"> *{ctx_r['passage']}*")
+        for q_r in ctx_r["question_results"]:
+            tag = "✅ Correct" if q_r["is_correct"] else "❌ Incorrect"
+            with st.expander(f"Question {q_r['question_id']} — {tag} · *{q_r['stem_family']}*", expanded=not q_r["is_correct"]):
+                for letter in ["A", "B", "C", "D"]:
+                    opt = q_r["options"][letter]
+                    if letter == q_r["correct_answer"] and letter == q_r["user_answer"]:
+                        st.markdown(f"- **{letter}. {opt}** ✅ Your answer")
+                    elif letter == q_r["correct_answer"]:
+                        st.markdown(f"- **{letter}. {opt}** ← Correct answer")
+                    elif letter == q_r["user_answer"]:
+                        st.markdown(f"- {letter}. {opt} ← Your answer")
+                    else:
+                        st.markdown(f"- {letter}. {opt}")
+                st.markdown(f"**Justification:** {q_r['justification']}")
+
+    if ev["stem_family_breakdown"]:
+        st.markdown("### Stem-family breakdown")
+        st.dataframe(
+            ev["stem_family_breakdown"],
+            hide_index=True,
+            column_config={
+                "stem_family": "Stem family",
+                "correct": "Correct",
+                "total": "Total",
+                "pct": st.column_config.NumberColumn("%", format="%.1f%%"),
+            },
+        )
+
+    if st.button("Try another exam"):
+        for k in ["rc_exam", "rc_answers", "rc_evaluation", "rc_n"]:
+            st.session_state.pop(k, None)
+        _go_to("welcome")
+        st.rerun()
+
+
 def _init_state():
     defaults = {
         "rc_stage": "welcome",
@@ -96,5 +193,9 @@ if stage == "welcome":
     _render_welcome()
 elif stage == "generating":
     _render_generating()
-else:
-    st.write(f"Stage `{stage}` not implemented yet.")
+elif stage == "taking":
+    _render_taking()
+elif stage == "evaluating":
+    _render_evaluating()
+elif stage == "results":
+    _render_results()
