@@ -19,6 +19,27 @@ TRACKING_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "user_e
 LEVEL_THRESHOLDS = {"C": 0.90, "B": 0.70, "A": 0.50}
 
 
+def _build_stem_family_breakdown(context_results: list) -> list:
+    """Compute per-stem-family correct/total/pct from per-question results."""
+    counts = {}
+    for ctx in context_results:
+        for q in ctx["question_results"]:
+            sf = q["stem_family"]
+            entry = counts.setdefault(sf, {"correct": 0, "total": 0})
+            entry["total"] += 1
+            if q["is_correct"]:
+                entry["correct"] += 1
+    return [
+        {
+            "stem_family": sf,
+            "correct": v["correct"],
+            "total": v["total"],
+            "pct": round(v["correct"] / v["total"] * 100, 1) if v["total"] else 0.0,
+        }
+        for sf, v in counts.items()
+    ]
+
+
 def _determine_level(score_pct: float) -> str:
     if score_pct >= LEVEL_THRESHOLDS["C"]:
         return "C"
@@ -63,6 +84,7 @@ def grade_reading_exam(exam: dict, user_answers: dict) -> dict:
 
     percentage = (correct_count / total_count * 100) if total_count > 0 else 0.0
     level = _determine_level(percentage / 100)
+    breakdown = _build_stem_family_breakdown(context_results) if total_count >= 4 else []
 
     return {
         "session_id": session_id,
@@ -72,5 +94,5 @@ def grade_reading_exam(exam: dict, user_answers: dict) -> dict:
         "percentage": round(percentage, 1),
         "level": level,
         "context_results": context_results,
-        "stem_family_breakdown": [],
+        "stem_family_breakdown": breakdown,
     }

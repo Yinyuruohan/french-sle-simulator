@@ -29,6 +29,31 @@ def _make_exam(num=2):
     }
 
 
+def _make_mixed_exam(stem_families):
+    """Helper: exam where each question has a specified stem_family."""
+    return {
+        "session_id": "reading_test",
+        "exam_kind": "reading_comprehension",
+        "contexts": [
+            {
+                "context_id": i + 1,
+                "passage": f"P{i+1}",
+                "has_signature": False,
+                "questions": [{
+                    "question_id": i + 1,
+                    "stem_family": sf,
+                    "question_text": "Q?",
+                    "options": {"A": "a", "B": "b", "C": "c", "D": "d"},
+                    "correct_answer": "A",
+                    "justification": "r",
+                    "bolded_term": None,
+                }],
+            }
+            for i, sf in enumerate(stem_families)
+        ],
+    }
+
+
 def test_grade_all_correct():
     from tools.grade_reading_exam import grade_reading_exam
     exam = _make_exam(2)
@@ -90,3 +115,24 @@ def test_grade_no_api_call():
     """grade_reading_exam does not import OpenAI."""
     import tools.grade_reading_exam as g
     assert "OpenAI" not in dir(g)
+
+
+def test_breakdown_empty_when_n_less_than_4():
+    from tools.grade_reading_exam import grade_reading_exam
+    exam = _make_mixed_exam(["main_idea", "title", "purpose"])  # N=3
+    result = grade_reading_exam(exam, {1: "A", 2: "A", 3: "A"})
+    assert result["stem_family_breakdown"] == []
+
+
+def test_breakdown_populated_when_n_4_or_more():
+    from tools.grade_reading_exam import grade_reading_exam
+    exam = _make_mixed_exam(["main_idea", "main_idea", "title", "title"])
+    # 1 right + 1 wrong for main_idea; 2 right for title
+    result = grade_reading_exam(exam, {1: "A", 2: "B", 3: "A", 4: "A"})
+    by_family = {row["stem_family"]: row for row in result["stem_family_breakdown"]}
+    assert by_family["main_idea"]["correct"] == 1
+    assert by_family["main_idea"]["total"] == 2
+    assert by_family["main_idea"]["pct"] == 50.0
+    assert by_family["title"]["correct"] == 2
+    assert by_family["title"]["total"] == 2
+    assert by_family["title"]["pct"] == 100.0
