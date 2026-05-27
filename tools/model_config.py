@@ -64,4 +64,9 @@ def load_default_configs() -> "dict[str, ModelConfig]":
             base_url=os.getenv("FLASHCARD_BASE_URL") or deepseek_url,
             model=os.getenv("FLASHCARD_MODEL") or deepseek_model,
         ),
+        "reading": ModelConfig(
+            api_key=os.getenv("READING_API_KEY") or deepseek_key,
+            base_url=os.getenv("READING_BASE_URL") or deepseek_url,
+            model=os.getenv("READING_MODEL") or deepseek_model,
+        ),
     }
