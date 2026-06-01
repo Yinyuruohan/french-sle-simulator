@@ -427,3 +427,25 @@ def test_prefill_returns_failure_when_all_critical(monkeypatch):
     result = prefill_bank(2, model_config=None)
     assert result["success"] is False
     assert get_bank_stats()["total_contexts"] == 0
+
+
+def test_prefill_excludes_context_with_both_critical_and_warning(monkeypatch):
+    """A context with critical+warning is excluded, not demoted to warned."""
+    import tools.reading_question_bank as rqb
+    from tools.reading_question_bank import init_db, prefill_bank, get_bank_stats
+
+    init_db()
+    exam = _exam([_ctx(i + 1, " ".join(["mot"] * 100) + f" d{i}") for i in range(2)])
+    monkeypatch.setattr(rqb, "_generate_reading_exam", lambda n, model_config: exam)
+    monkeypatch.setattr(rqb, "_review_reading_exam", lambda e: {
+        "flagged_questions": [
+            {"context_id": 1, "severity": "critical", "category": "x", "issue": ""},
+            {"context_id": 1, "severity": "warning",  "category": "y", "issue": ""},
+        ]
+    })
+    result = prefill_bank(2, model_config=None)
+    assert result["success"] is True
+    stats = get_bank_stats()
+    assert stats["total_contexts"] == 1   # ctx 1 excluded, not demoted to warned
+    assert stats["warned"] == 0
+    assert stats["reviewed"] == 1
