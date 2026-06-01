@@ -110,3 +110,28 @@ def cache_contexts(exam: dict, status: str = "reviewed"):
         conn.commit()
     finally:
         conn.close()
+
+
+def get_bank_stats() -> dict:
+    """Return cache stats grouped by status. total_questions == total_contexts for RC."""
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) FROM rc_contexts GROUP BY status"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    stats = {
+        "total_contexts": 0, "total_questions": 0,
+        "reviewed": 0, "battle_tested": 0, "warned": 0,
+        "reviewed_questions": 0, "battle_tested_questions": 0, "warned_questions": 0,
+    }
+    for row in rows:
+        status, count = row[0], row[1]
+        stats["total_contexts"] += count
+        stats["total_questions"] += count
+        if status in ("reviewed", "battle_tested", "warned"):
+            stats[status] = count
+            stats[f"{status}_questions"] = count
+    return stats

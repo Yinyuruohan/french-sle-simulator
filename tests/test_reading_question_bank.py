@@ -120,3 +120,28 @@ def test_cache_contexts_writes_stem_family_and_status():
         assert row[1] == "warned"
     finally:
         conn.close()
+
+
+def test_get_bank_stats_empty():
+    from tools.reading_question_bank import init_db, get_bank_stats
+    init_db()
+    stats = get_bank_stats()
+    assert stats["total_contexts"] == 0
+    assert stats["total_questions"] == 0
+    assert stats["reviewed"] == 0
+    assert stats["battle_tested"] == 0
+    assert stats["warned"] == 0
+
+
+def test_get_bank_stats_counts_by_status():
+    from tools.reading_question_bank import init_db, cache_contexts, get_bank_stats
+    init_db()
+    cache_contexts(_exam([_ctx(1, "P1")]), status="reviewed")
+    cache_contexts(_exam([_ctx(2, "P2")]), status="reviewed")
+    cache_contexts(_exam([_ctx(3, "P3")]), status="warned")
+    stats = get_bank_stats()
+    assert stats["total_contexts"] == 3
+    assert stats["total_questions"] == 3  # RC: 1:1 with contexts
+    assert stats["reviewed"] == 2
+    assert stats["warned"] == 1
+    assert stats["battle_tested"] == 0
