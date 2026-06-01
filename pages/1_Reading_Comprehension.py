@@ -217,12 +217,16 @@ def _render_welcome():
     with col_b:
         if st.button(f"Prefill bank ({int(n)})"):
             with st.spinner(f"Generating and reviewing {int(n)} passages…"):
-                result = rc_prefill_bank(int(n),
-                                         model_config=st.session_state.rc_model_config)
-            if result["success"]:
-                st.success(result["message"])
-            else:
-                st.error(result["message"])
+                try:
+                    result = rc_prefill_bank(int(n),
+                                             model_config=st.session_state.rc_model_config)
+                except Exception as e:
+                    st.error(f"Prefill failed: {e}")
+                else:
+                    if result["success"]:
+                        st.success(result["message"])
+                    else:
+                        st.error(result["message"])
             st.rerun()
 
     if st.button("Generate exam", type="primary"):
