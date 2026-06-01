@@ -17,11 +17,11 @@ def test_modelconfig_stores_fields():
     assert cfg.model == "m"
 
 
-def test_load_default_configs_returns_four_keys(monkeypatch):
-    """load_default_configs returns generate, evaluate, review, flashcard keys."""
+def test_load_default_configs_returns_all_keys(monkeypatch):
+    """load_default_configs returns generate, evaluate, review, flashcard, reading keys."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     configs = load_default_configs()
-    assert set(configs.keys()) == {"generate", "evaluate", "review", "flashcard"}
+    assert set(configs.keys()) == {"generate", "evaluate", "review", "flashcard", "reading"}
 
 
 def test_load_default_configs_falls_back_to_deepseek_key(monkeypatch):
@@ -77,3 +77,26 @@ def test_default_base_url_and_model(monkeypatch):
 
     assert configs["generate"].base_url == "https://api.deepseek.com"
     assert configs["generate"].model == "deepseek-v4-pro"
+
+
+def test_load_default_configs_reading_uses_reading_env_vars(monkeypatch):
+    """READING_API_KEY / READING_BASE_URL / READING_MODEL override DEEPSEEK defaults."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-key")
+    monkeypatch.setenv("READING_API_KEY", "reading-key")
+    monkeypatch.setenv("READING_BASE_URL", "https://reading.example.com")
+    monkeypatch.setenv("READING_MODEL", "reading-model")
+    configs = load_default_configs()
+    assert configs["reading"].api_key == "reading-key"
+    assert configs["reading"].base_url == "https://reading.example.com"
+    assert configs["reading"].model == "reading-model"
+
+
+def test_load_default_configs_reading_falls_back_to_deepseek(monkeypatch):
+    """Without READING_* vars, reading config falls back to DEEPSEEK defaults."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-key")
+    for k in ["READING_API_KEY", "READING_BASE_URL", "READING_MODEL"]:
+        monkeypatch.delenv(k, raising=False)
+    configs = load_default_configs()
+    assert configs["reading"].api_key == "ds-key"
+    assert configs["reading"].base_url == "https://api.deepseek.com"
+    assert configs["reading"].model == "deepseek-v4-pro"
