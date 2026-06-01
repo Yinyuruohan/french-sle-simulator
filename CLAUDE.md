@@ -15,6 +15,8 @@ This app generates realistic French SLE Written Expression exam questions via a 
 - `tools/evaluate_exam.py` — grades answers and displays pre-generated feedback (no AI API)
 - `tools/review_exam.py` — validates exam quality and feedback accuracy (AI API)
 - `tools/question_bank.py` — SQLite question bank: cache validated contexts, assemble instant exams
+- `tools/reading_question_bank.py` — RC SQLite question bank (sibling of `question_bank.py`); caches RC passages and assembles instant exams
+- `tools/review_reading_exam.py` — rule-based RC reviewer (no LLM); used by `reading_question_bank.prefill_bank`
 - `tools/flashcard_db.py` — shared inbox helper; lets `app.py` write vocab words to `flashcard/flashcard.db` without requiring the flashcard server to be running
 - `workflows/sle_exam_simulator.md` — full SOP for the exam workflow
 
@@ -57,6 +59,8 @@ tools/
   evaluate_exam.py        # Grade answers deterministically, display pre-generated feedback (no AI API)
   review_exam.py          # Conservative QA review of exam questions and feedback explanations
   question_bank.py        # SQLite question bank: cache, assemble, prefill
+  reading_question_bank.py  # RC SQLite question bank: cache RC passages, assemble instant RC exams
+  review_reading_exam.py  # Rule-based RC reviewer (no LLM); validates passages before caching
   grader_db.py            # Reviews table: init, CRUD, filtered queries, staleness detection
   flashcard_db.py         # Shared inbox helper: add_to_inbox(); writes to flashcard/flashcard.db
   llm_evaluator.py        # LLM judge: evaluate_context() rates a context Good/Bad with critique
@@ -103,6 +107,7 @@ Exams use a **contexts → questions** structure:
 - **AI Engine:** Any OpenAI-compatible endpoint via `openai` Python SDK. Default: DeepSeek (`base_url="https://api.deepseek.com"`, model `deepseek-v4-pro`). Per-tool overrides via `GENERATE_*`, `EVALUATE_*`, `REVIEW_*`, `EVALUATOR_*`, `FLASHCARD_*` env vars or the in-app "AI model settings" expander. `tools/model_config.py` is the single source of truth.
 - **Flashcard app:** `flashcard/app.py` — Flask 3 server on port 5002. All REST routes, SQLite schema (`decks`, `cards`, `sessions`, `inbox`, `seed_meta`), and the React 18 + Vite 5 SPA serving (HashRouter) live in this single file. `tools/flashcard_db.py` is a lightweight shared helper (just `add_to_inbox()`, with lazy `init_db()` on first call) that lets `app.py` write vocab words to `flashcard/flashcard.db` without importing Flask. The flashcard AI uses `FLASHCARD_*` env vars (falls back to `DEEPSEEK_API_KEY` + `deepseek-v4-pro`). The Vite build output (`flashcard/static/dist/`) is committed so the server works with no Node.js tooling in production.
 - **LLM Evaluator:** `tools/llm_evaluator.py` — `evaluate_context(context_data, model_config)` calls the LLM judge (`LLM_judge_prompt.md` as system prompt) and returns `{"rating": "Good"|"Bad", "critique": "..."}`. Configured via `EVALUATOR_*` env vars (falls back to `DEEPSEEK_API_KEY` + `deepseek-v4-pro`). Uses `max_tokens=4096` to accommodate reasoning model chain-of-thought overhead.
+- **RC question bank:** `tools/reading_question_bank.py` mirrors `tools/question_bank.py` but for Reading Comprehension. Schema differs (1 question per context, `stem_family` instead of `grammar_topics`, `has_signature` flag). Reviewer is rule-based (`tools/review_reading_exam.py`) — no LLM call. Same lifecycle (`reviewed` → `battle_tested`; `warned` permanent). DB file: `reading_question_bank.db` (gitignored).
 - **Exam generation:** Single API call produces questions AND explanations (why_correct + grammar_rule), JSON response format, temperature 0.7, max_tokens 16000. ~50% fill-in-blank, ~50% error identification, 2-20 questions. Prompt enforces broad grammar coverage: 11 real SLE topics, no topic repeated more than twice. Explanations must not reference option letters (shuffled post-generation). Post-generation option shuffling randomizes A/B/C/D for fill-in-blank questions; error identification options are never shuffled.
 - **Evaluation:** Fully deterministic — no API call. Scores answers against the answer key and displays pre-generated explanations from exam data.
 - **Quality review:** Single unified review (`review_exam_quality()`) validates questions AND explanations at temperature 0.1. Deterministic pre-checks: duplicate options and structural mismatches (passage blanks vs question IDs, error-ID segments vs options). Only deterministic failures (`duplicate_options`, `structural_mismatch`) are critical; all 11 AI-judgment categories are capped at "warning". Contexts with warnings cache as `warned` (never upgrade to `battle_tested`). User flagging deprioritizes contexts in assembly. Critical issues trigger targeted regeneration (max 1 retry per context). All flagged issues logged to `system_error_tracking.md`.
