@@ -14,6 +14,19 @@ from tools.generate_reading_exam import generate_reading_exam
 from tools.grade_reading_exam import grade_reading_exam
 from tools.model_config import load_default_configs
 from tools.streamlit_design import inject_design_system
+from tools.reading_question_bank import (
+    init_db as rc_init_db,
+    cache_contexts as rc_cache_contexts,
+    get_bank_stats as rc_get_bank_stats,
+    assemble_exam_from_cache as rc_assemble_from_cache,
+    prefill_bank as rc_prefill_bank,
+    upgrade_to_battle_tested as rc_upgrade_to_battle_tested,
+    update_last_incorrect as rc_update_last_incorrect,
+    flag_context as rc_flag_context,
+    lookup_context_ids_by_hashes as rc_lookup_ids,
+    _passage_hash as rc_passage_hash,
+)
+from tools.review_reading_exam import review_reading_exam, EXAM_LEVEL_WARNING_CATEGORIES
 
 st.set_page_config(
     page_title="SLE Reading Comprehension",
@@ -21,6 +34,7 @@ st.set_page_config(
     layout="wide",
 )
 inject_design_system()
+rc_init_db()
 
 
 def _render_taking():
@@ -68,6 +82,17 @@ def _render_taking():
 def _render_evaluating():
     with st.spinner("Grading your answers…"):
         evaluation = grade_reading_exam(st.session_state.rc_exam, st.session_state.rc_answers)
+    # Persist per-context bank metadata onto the evaluation so update/upgrade
+    # can match cached contexts. grade_reading_exam doesn't carry these forward.
+    bank_meta = {ctx["context_id"]: ctx for ctx in st.session_state.rc_exam.get("contexts", [])}
+    for ctx_r in evaluation["context_results"]:
+        orig = bank_meta.get(ctx_r["context_id"], {})
+        ctx_r["bank_context_id"] = orig.get("bank_context_id")
+        ctx_r["original_passage_hash"] = orig.get("original_passage_hash")
+
+    rc_update_last_incorrect(evaluation)
+    rc_upgrade_to_battle_tested(evaluation.get("session_id", ""), evaluation)
+
     st.session_state.rc_evaluation = evaluation
     _go_to("results")
     st.rerun()
@@ -100,6 +125,23 @@ def _render_results():
                         st.markdown(f"- {letter}. {opt}")
                 st.markdown(f"**Justification:** {q_r['justification']}")
 
+        bank_id = ctx_r.get("bank_context_id")
+        p_hash = ctx_r.get("original_passage_hash")
+        if bank_id or p_hash:
+            flag_category = st.selectbox(
+                "Flag quality issue / Signaler un problème",
+                ["Wrong answer key", "Multiple correct answers",
+                 "Unclear passage", "Bad justification", "Other"],
+                key=f"rc_flag_cat_{ctx_r['context_id']}",
+            )
+            if st.button("Submit flag / Soumettre",
+                         key=f"rc_flag_btn_{ctx_r['context_id']}"):
+                rc_flag_context(bank_context_id=bank_id,
+                                passage_hash=p_hash,
+                                category=flag_category)
+                st.success("Flag submitted. This passage will be deprioritized.")
+        st.divider()
+
     if ev["stem_family_breakdown"]:
         st.markdown("### Stem-family breakdown")
         st.dataframe(
@@ -114,7 +156,7 @@ def _render_results():
         )
 
     if st.button("Try another exam"):
-        for k in ["rc_exam", "rc_answers", "rc_evaluation", "rc_n"]:
+        for k in ["rc_exam", "rc_answers", "rc_evaluation", "rc_n", "rc_source"]:
             st.session_state.pop(k, None)
         _go_to("welcome")
         st.rerun()
@@ -144,6 +186,13 @@ def _render_welcome():
         "Practice the Canadian federal SLE Reading Comprehension test. "
         "Pick a length, then generate an exam in administrative French."
     )
+    stats = rc_get_bank_stats()
+    st.markdown(
+        f"**Bank:** {stats['total_questions']} cached questions · "
+        f"{stats['battle_tested']} battle-tested · "
+        f"{stats['reviewed']} reviewed · "
+        f"{stats['warned']} warned"
+    )
     n = st.number_input(
         "Number of questions",
         min_value=2,
@@ -164,23 +213,115 @@ def _render_welcome():
             cfg.model = new_model
             cfg.base_url = new_base
 
-    if st.button("Generate exam", type="primary"):
-        st.session_state.rc_n = int(n)
-        _go_to("generating")
-        st.rerun()
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        st.caption("Prefill the bank with N passages (uses 1 API call).")
+    with col_b:
+        if st.button(f"Prefill bank ({int(n)})"):
+            with st.spinner(f"Generating and reviewing {int(n)} passages…"):
+                try:
+                    result = rc_prefill_bank(int(n),
+                                             model_config=st.session_state.rc_model_config)
+                except Exception as e:
+                    st.session_state.rc_prefill_msg = ("error", f"Prefill failed: {e}")
+                else:
+                    if result["success"]:
+                        st.session_state.rc_prefill_msg = ("success", result["message"])
+                    else:
+                        st.session_state.rc_prefill_msg = ("error", result["message"])
+            st.rerun()
+
+    if "rc_prefill_msg" in st.session_state:
+        kind, msg = st.session_state.pop("rc_prefill_msg")
+        if kind == "success":
+            st.success(msg)
+        else:
+            st.error(msg)
+
+    instant_disabled = stats["unflagged_questions"] < int(n)
+    col_instant, col_fresh = st.columns(2)
+    with col_instant:
+        if st.button(
+            "Instant exam (from bank)",
+            use_container_width=True,
+            disabled=instant_disabled,
+            help=("Not enough cached questions — prefill the bank or generate fresh."
+                  if instant_disabled else None),
+        ):
+            st.session_state.rc_n = int(n)
+            st.session_state.rc_source = "cache"
+            _go_to("generating")
+            st.rerun()
+    with col_fresh:
+        if st.button("Generate fresh (API)", type="primary", use_container_width=True):
+            st.session_state.rc_n = int(n)
+            st.session_state.rc_source = "fresh"
+            _go_to("generating")
+            st.rerun()
 
 
 def _render_generating():
     n = st.session_state.get("rc_n", 5)
-    with st.spinner(f"Generating {n}-question Reading Comprehension exam…"):
-        try:
-            exam = generate_reading_exam(n, model_config=st.session_state.rc_model_config)
-        except Exception as e:
-            st.error(f"Generation failed: {e}")
-            if st.button("Retry"):
+    source = st.session_state.get("rc_source", "fresh")
+    exam = None
+
+    # Cache path — only when the user explicitly chose Instant
+    if source == "cache":
+        cache_result = rc_assemble_from_cache(n)
+        cached_exam = cache_result["exam"]
+        if cached_exam is not None and cached_exam["num_questions"] >= n:
+            exam = cached_exam
+        else:
+            st.error("Not enough cached questions. Prefill the bank or use Generate fresh.")
+            if st.button("Back to setup"):
                 _go_to("welcome")
                 st.rerun()
             return
+
+    # Fresh generation path
+    if exam is None:
+        with st.spinner(f"Generating {n}-question Reading Comprehension exam…"):
+            try:
+                fresh = generate_reading_exam(n,
+                                              model_config=st.session_state.rc_model_config)
+            except Exception as e:
+                st.error(f"Generation failed: {e}")
+                if st.button("Retry"):
+                    _go_to("welcome")
+                    st.rerun()
+                return
+
+            # Rule-based review + cache split (no API call here — reviewer is rule-based)
+            review = review_reading_exam(fresh)
+            critical_ids = {f["context_id"] for f in review["flagged_questions"]
+                            if f["severity"] == "critical"}
+            warned_ids = {f["context_id"] for f in review["flagged_questions"]
+                          if f["severity"] == "warning"
+                          and f["category"] not in EXAM_LEVEL_WARNING_CATEGORIES}
+            clean_contexts = [c for c in fresh["contexts"] if c["context_id"] not in critical_ids]
+            warned_contexts = [c for c in clean_contexts if c["context_id"] in warned_ids]
+            reviewed_contexts = [c for c in clean_contexts if c["context_id"] not in warned_ids]
+            if reviewed_contexts:
+                rc_cache_contexts(dict(fresh, contexts=reviewed_contexts), status="reviewed")
+            if warned_contexts:
+                rc_cache_contexts(dict(fresh, contexts=warned_contexts), status="warned")
+
+            # Back-fill bank_context_id onto freshly-cached contexts so the flag
+            # UI works on the results page without requiring a second exam.
+            cached_contexts = reviewed_contexts + warned_contexts
+            if cached_contexts:
+                hashes = [rc_passage_hash(c["passage"]) for c in cached_contexts]
+                id_map = rc_lookup_ids(hashes)
+                for ctx in fresh["contexts"]:
+                    h = rc_passage_hash(ctx["passage"])
+                    if h in id_map:
+                        ctx["bank_context_id"] = id_map[h]
+                        ctx["original_passage_hash"] = h
+
+            # Serve the fresh exam as-is (including any critically-flagged contexts,
+            # so the user gets the N items they asked for; only the bank is selective).
+            exam = fresh
+
     st.session_state.rc_exam = exam
     st.session_state.rc_answers = {}
     _go_to("taking")
