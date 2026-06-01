@@ -42,13 +42,13 @@ def _check_context_critical(ctx: dict) -> list[dict]:
     question_text = q.get("question_text", "")
 
     # duplicate_options — two or more of A/B/C/D have identical text
-    values = [options[k].strip() for k in ("A", "B", "C", "D")]
+    values = [options[k].strip().lower() for k in ("A", "B", "C", "D")]
     if len(set(values)) < 4:
         findings.append({
             "context_id": ctx_id,
             "severity": "critical",
             "category": "duplicate_options",
-            "detail": f"non-unique options: {values}",
+            "issue": f"non-unique options: {values}",
         })
 
     if stem_family == "vocabulary":
@@ -58,7 +58,7 @@ def _check_context_critical(ctx: dict) -> list[dict]:
                 "context_id": ctx_id,
                 "severity": "critical",
                 "category": "bolded_term_missing_in_passage",
-                "detail": f"'**{bolded_term}**' not in passage",
+                "issue": f"'**{bolded_term}**' not in passage",
             })
         # vocab_term_missing_in_stem — bolded_term not repeated in question_text
         if bolded_term and bolded_term not in question_text:
@@ -66,7 +66,7 @@ def _check_context_critical(ctx: dict) -> list[dict]:
                 "context_id": ctx_id,
                 "severity": "critical",
                 "category": "vocab_term_missing_in_stem",
-                "detail": f"'{bolded_term}' not in question_text",
+                "issue": f"'{bolded_term}' not in question_text",
             })
 
     if stem_family == "sentence_completion":
@@ -75,7 +75,7 @@ def _check_context_critical(ctx: dict) -> list[dict]:
                 "context_id": ctx_id,
                 "severity": "critical",
                 "category": "sentence_completion_missing_blank",
-                "detail": "passage does not end with '____.' pattern",
+                "issue": "passage does not end with '____.' pattern",
             })
 
     return findings
