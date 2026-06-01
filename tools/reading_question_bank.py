@@ -153,7 +153,7 @@ def assemble_exam_from_cache(num_questions: int) -> dict:
 
         rows = conn.execute(
             "SELECT context_id, passage, has_signature, question_json, "
-            "stem_family, status, user_flags "
+            "stem_family, status, user_flags, passage_hash "
             "FROM rc_contexts "
             "ORDER BY "
             "  CASE WHEN user_flags >= 1 THEN 1 ELSE 0 END, "
@@ -223,7 +223,7 @@ def _build_exam_from_rows(rows: list) -> dict:
             "has_signature": bool(row["has_signature"]),
             "questions": [question],
             "bank_context_id": row["context_id"],
-            "original_passage_hash": _passage_hash(row["passage"]),
+            "original_passage_hash": row["passage_hash"],
             "bank_status": row["status"],
         })
 
