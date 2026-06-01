@@ -14,6 +14,17 @@ from tools.generate_reading_exam import generate_reading_exam
 from tools.grade_reading_exam import grade_reading_exam
 from tools.model_config import load_default_configs
 from tools.streamlit_design import inject_design_system
+from tools.reading_question_bank import (
+    init_db as rc_init_db,
+    cache_contexts as rc_cache_contexts,
+    get_bank_stats as rc_get_bank_stats,
+    assemble_exam_from_cache as rc_assemble_from_cache,
+    prefill_bank as rc_prefill_bank,
+    upgrade_to_battle_tested as rc_upgrade_to_battle_tested,
+    update_last_incorrect as rc_update_last_incorrect,
+    flag_context as rc_flag_context,
+)
+from tools.review_reading_exam import review_reading_exam
 
 st.set_page_config(
     page_title="SLE Reading Comprehension",
@@ -21,6 +32,7 @@ st.set_page_config(
     layout="wide",
 )
 inject_design_system()
+rc_init_db()
 
 
 def _render_taking():
@@ -144,6 +156,13 @@ def _render_welcome():
         "Practice the Canadian federal SLE Reading Comprehension test. "
         "Pick a length, then generate an exam in administrative French."
     )
+    stats = rc_get_bank_stats()
+    st.markdown(
+        f"**Bank:** {stats['total_questions']} cached questions · "
+        f"{stats['battle_tested']} battle-tested · "
+        f"{stats['reviewed']} reviewed · "
+        f"{stats['warned']} warned"
+    )
     n = st.number_input(
         "Number of questions",
         min_value=2,
@@ -163,6 +182,20 @@ def _render_welcome():
         if new_model != cfg.model or new_base != cfg.base_url:
             cfg.model = new_model
             cfg.base_url = new_base
+
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        st.caption("Prefill the bank with N passages (uses 1 API call).")
+    with col_b:
+        if st.button(f"Prefill bank ({int(n)})"):
+            with st.spinner(f"Generating and reviewing {int(n)} passages…"):
+                result = rc_prefill_bank(int(n),
+                                         model_config=st.session_state.rc_model_config)
+            if result["success"]:
+                st.success(result["message"])
+            else:
+                st.error(result["message"])
+            st.rerun()
 
     if st.button("Generate exam", type="primary"):
         st.session_state.rc_n = int(n)
