@@ -80,6 +80,17 @@ def _render_taking():
 def _render_evaluating():
     with st.spinner("Grading your answers…"):
         evaluation = grade_reading_exam(st.session_state.rc_exam, st.session_state.rc_answers)
+    # Persist per-context bank metadata onto the evaluation so update/upgrade
+    # can match cached contexts. grade_reading_exam doesn't carry these forward.
+    bank_meta = {ctx["context_id"]: ctx for ctx in st.session_state.rc_exam.get("contexts", [])}
+    for ctx_r in evaluation["context_results"]:
+        orig = bank_meta.get(ctx_r["context_id"], {})
+        ctx_r["bank_context_id"] = orig.get("bank_context_id")
+        ctx_r["original_passage_hash"] = orig.get("original_passage_hash")
+
+    rc_update_last_incorrect(evaluation)
+    rc_upgrade_to_battle_tested(evaluation.get("session_id", ""), evaluation)
+
     st.session_state.rc_evaluation = evaluation
     _go_to("results")
     st.rerun()
@@ -111,6 +122,23 @@ def _render_results():
                     else:
                         st.markdown(f"- {letter}. {opt}")
                 st.markdown(f"**Justification:** {q_r['justification']}")
+
+        bank_id = ctx_r.get("bank_context_id")
+        p_hash = ctx_r.get("original_passage_hash")
+        if bank_id or p_hash:
+            flag_category = st.selectbox(
+                "Flag quality issue / Signaler un problème",
+                ["Wrong answer key", "Multiple correct answers",
+                 "Unclear passage", "Bad justification", "Other"],
+                key=f"rc_flag_cat_{ctx_r['context_id']}",
+            )
+            if st.button("Submit flag / Soumettre",
+                         key=f"rc_flag_btn_{ctx_r['context_id']}"):
+                rc_flag_context(bank_context_id=bank_id,
+                                passage_hash=p_hash,
+                                category=flag_category)
+                st.success("Flag submitted. This passage will be deprioritized.")
+        st.divider()
 
     if ev["stem_family_breakdown"]:
         st.markdown("### Stem-family breakdown")
