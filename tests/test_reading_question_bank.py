@@ -145,3 +145,88 @@ def test_get_bank_stats_counts_by_status():
     assert stats["reviewed"] == 2
     assert stats["warned"] == 1
     assert stats["battle_tested"] == 0
+
+
+def test_assemble_empty_bank_returns_none_exam():
+    from tools.reading_question_bank import init_db, assemble_exam_from_cache
+    init_db()
+    result = assemble_exam_from_cache(3)
+    assert result["exam"] is None
+    assert result["available_questions"] == 0
+
+
+def test_assemble_returns_exam_dict_with_renumbered_ids():
+    from tools.reading_question_bank import init_db, cache_contexts, assemble_exam_from_cache
+    init_db()
+    cache_contexts(_exam([_ctx(1, "P1"), _ctx(2, "P2")]))
+    result = assemble_exam_from_cache(2)
+    exam = result["exam"]
+    assert exam is not None
+    assert exam["source"] == "cache"
+    assert exam["exam_kind"] == "reading_comprehension"
+    assert [c["context_id"] for c in exam["contexts"]] == [1, 2]
+    qids = [c["questions"][0]["question_id"] for c in exam["contexts"]]
+    assert qids == [1, 2]
+
+
+def test_assemble_propagates_bank_context_id_and_passage_hash():
+    from tools.reading_question_bank import init_db, cache_contexts, assemble_exam_from_cache
+    init_db()
+    cache_contexts(_exam([_ctx(1, "Unique passage X.")]))
+    result = assemble_exam_from_cache(1)
+    ctx = result["exam"]["contexts"][0]
+    assert ctx["bank_context_id"]
+    assert ctx["original_passage_hash"]
+    assert ctx["bank_status"] == "reviewed"
+
+
+def test_assemble_increments_times_served():
+    import sqlite3
+    from tools.reading_question_bank import init_db, cache_contexts, assemble_exam_from_cache, DB_PATH
+    init_db()
+    cache_contexts(_exam([_ctx(1, "P1")]))
+    assemble_exam_from_cache(1)
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        served = conn.execute("SELECT times_served FROM rc_contexts").fetchone()[0]
+        assert served == 1
+    finally:
+        conn.close()
+
+
+def test_assemble_prefers_battle_tested_over_reviewed_over_warned():
+    from tools.reading_question_bank import init_db, cache_contexts, assemble_exam_from_cache
+    init_db()
+    cache_contexts(_exam([_ctx(1, "reviewed_p")]), status="reviewed")
+    cache_contexts(_exam([_ctx(2, "battle_p")]), status="battle_tested")
+    cache_contexts(_exam([_ctx(3, "warned_p")]), status="warned")
+    result = assemble_exam_from_cache(1)
+    assert result["exam"]["contexts"][0]["passage"] == "battle_p"
+
+
+def test_assemble_deprioritizes_user_flagged():
+    from tools.reading_question_bank import (
+        init_db, cache_contexts, assemble_exam_from_cache, flag_context, _passage_hash
+    )
+    init_db()
+    cache_contexts(_exam([_ctx(1, "flagged_p")]))
+    cache_contexts(_exam([_ctx(2, "clean_p")]))
+    flag_context(passage_hash=_passage_hash("flagged_p"), category="test")
+    result = assemble_exam_from_cache(1)
+    assert result["exam"]["contexts"][0]["passage"] == "clean_p"
+
+
+def test_assemble_spreads_across_stem_families():
+    from tools.reading_question_bank import init_db, cache_contexts, assemble_exam_from_cache
+    init_db()
+    families = [
+        ("main_idea", "P main 1"),
+        ("main_idea", "P main 2"),
+        ("title",     "P title"),
+        ("purpose",   "P purpose"),
+    ]
+    for i, (fam, p) in enumerate(families):
+        cache_contexts(_exam([_ctx(i + 1, p, q=_q(stem_family=fam, qid=i + 1))]))
+    result = assemble_exam_from_cache(3)
+    fams_used = [c["questions"][0]["stem_family"] for c in result["exam"]["contexts"]]
+    assert sorted(fams_used) == ["main_idea", "purpose", "title"]

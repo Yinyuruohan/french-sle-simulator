@@ -135,3 +135,123 @@ def get_bank_stats() -> dict:
             stats[status] = count
             stats[f"{status}_questions"] = count
     return stats
+
+
+def assemble_exam_from_cache(num_questions: int) -> dict:
+    """Pick N contexts with even stem_family spread; renumber ids.
+
+    Ordering: user-flagged deprioritized → battle_tested > reviewed > warned →
+    times_served ASC, RANDOM().
+
+    Returns {available_questions: int, exam: dict|None}.
+    """
+    conn = _get_conn()
+    try:
+        available = conn.execute("SELECT COUNT(*) FROM rc_contexts").fetchone()[0]
+        if available == 0 or num_questions <= 0:
+            return {"available_questions": available, "exam": None}
+
+        rows = conn.execute(
+            "SELECT context_id, passage, has_signature, question_json, "
+            "stem_family, status, user_flags "
+            "FROM rc_contexts "
+            "ORDER BY "
+            "  CASE WHEN user_flags >= 1 THEN 1 ELSE 0 END, "
+            "  CASE status WHEN 'battle_tested' THEN 0 WHEN 'reviewed' THEN 1 WHEN 'warned' THEN 2 END, "
+            "  times_served ASC, RANDOM()"
+        ).fetchall()
+
+        selected = _select_contexts_evenly(rows, num_questions)
+        if not selected:
+            return {"available_questions": available, "exam": None}
+
+        for row in selected:
+            conn.execute(
+                "UPDATE rc_contexts SET times_served = times_served + 1 WHERE context_id = ?",
+                (row["context_id"],),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    exam = _build_exam_from_rows(selected)
+    return {"available_questions": available, "exam": exam}
+
+
+def _select_contexts_evenly(rows, target_questions: int) -> list:
+    """Greedy pick by least-represented stem_family, up to target. RC has 1 q per ctx."""
+    if not rows or target_questions <= 0:
+        return []
+
+    remaining = list(rows)
+    family_counts: dict[str, int] = {}
+    selected = []
+    while remaining and len(selected) < target_questions:
+        best = None
+        best_score = float("inf")
+        for row in remaining:
+            score = family_counts.get(row["stem_family"], 0)
+            if score < best_score:
+                best_score = score
+                best = row
+        if best is None:
+            break
+        selected.append(best)
+        family_counts[best["stem_family"]] = family_counts.get(best["stem_family"], 0) + 1
+        remaining.remove(best)
+
+    return selected
+
+
+def _build_exam_from_rows(rows: list) -> dict:
+    """Return an RC exam dict, renumbering context_ids and question_ids to 1..N."""
+    contexts = []
+    for idx, row in enumerate(rows, start=1):
+        stored_q = json.loads(row["question_json"])
+        question = {
+            "question_id": idx,
+            "stem_family": stored_q["stem_family"],
+            "question_text": stored_q["question_text"],
+            "options": stored_q["options"],
+            "correct_answer": stored_q["correct_answer"],
+            "justification": stored_q.get("justification", ""),
+            "bolded_term": stored_q.get("bolded_term"),
+        }
+        contexts.append({
+            "context_id": idx,
+            "passage": row["passage"],
+            "has_signature": bool(row["has_signature"]),
+            "questions": [question],
+            "bank_context_id": row["context_id"],
+            "original_passage_hash": _passage_hash(row["passage"]),
+            "bank_status": row["status"],
+        })
+
+    timestamp = datetime.now()
+    return {
+        "session_id": f"reading_{timestamp.strftime('%Y%m%d_%H%M%S')}",
+        "timestamp": timestamp.isoformat(),
+        "exam_kind": "reading_comprehension",
+        "num_questions": len(contexts),
+        "contexts": contexts,
+        "source": "cache",
+    }
+
+
+def flag_context(bank_context_id: str = None, passage_hash: str = None, category: str = ""):
+    """Increment user_flags. (Tracking-file logging added in Task 6.)"""
+    conn = _get_conn()
+    try:
+        if bank_context_id:
+            conn.execute(
+                "UPDATE rc_contexts SET user_flags = user_flags + 1 WHERE context_id = ?",
+                (bank_context_id,),
+            )
+        elif passage_hash:
+            conn.execute(
+                "UPDATE rc_contexts SET user_flags = user_flags + 1 WHERE passage_hash = ?",
+                (passage_hash,),
+            )
+        conn.commit()
+    finally:
+        conn.close()
