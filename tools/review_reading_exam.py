@@ -14,6 +14,14 @@ import re
 
 _SENTENCE_COMPLETION_BLANK = re.compile(r"_{4,}\s*\.\s*$")
 
+# These warning categories are evaluated at the exam level (not per-context) and
+# should not cause individual clean passages to be cached as 'warned'.
+EXAM_LEVEL_WARNING_CATEGORIES = frozenset({
+    "signature_missing",
+    "answer_key_clustering",
+    "stem_family_overuse",
+})
+
 
 def review_reading_exam(exam: dict) -> dict:
     """Deterministically review an RC exam.

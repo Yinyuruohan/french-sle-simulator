@@ -119,6 +119,9 @@ def get_bank_stats() -> dict:
         rows = conn.execute(
             "SELECT status, COUNT(*) FROM rc_contexts GROUP BY status"
         ).fetchall()
+        unflagged = conn.execute(
+            "SELECT COUNT(*) FROM rc_contexts WHERE user_flags = 0"
+        ).fetchone()[0]
     finally:
         conn.close()
 
@@ -126,6 +129,7 @@ def get_bank_stats() -> dict:
         "total_contexts": 0, "total_questions": 0,
         "reviewed": 0, "battle_tested": 0, "warned": 0,
         "reviewed_questions": 0, "battle_tested_questions": 0, "warned_questions": 0,
+        "unflagged_questions": unflagged,
     }
     for row in rows:
         status, count = row[0], row[1]
@@ -135,6 +139,22 @@ def get_bank_stats() -> dict:
             stats[status] = count
             stats[f"{status}_questions"] = count
     return stats
+
+
+def lookup_context_ids_by_hashes(passage_hashes: list[str]) -> dict[str, str]:
+    """Return a {passage_hash: context_id (UUID)} map for the given hashes."""
+    if not passage_hashes:
+        return {}
+    placeholders = ",".join("?" * len(passage_hashes))
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            f"SELECT passage_hash, context_id FROM rc_contexts WHERE passage_hash IN ({placeholders})",
+            passage_hashes,
+        ).fetchall()
+    finally:
+        conn.close()
+    return {row["passage_hash"]: row["context_id"] for row in rows}
 
 
 def assemble_exam_from_cache(num_questions: int) -> dict:
@@ -362,6 +382,7 @@ def _review_reading_exam(exam: dict):
 
 def prefill_bank(num_questions: int, model_config) -> dict:
     """Generate + rule-based review + cache. Returns {success, message}."""
+    from tools.review_reading_exam import EXAM_LEVEL_WARNING_CATEGORIES
     exam = _generate_reading_exam(num_questions, model_config=model_config)
     review = _review_reading_exam(exam)
 
@@ -373,7 +394,7 @@ def prefill_bank(num_questions: int, model_config) -> dict:
             continue
         if f.get("severity") == "critical":
             critical_ctx_ids.add(ctx_id)
-        elif f.get("severity") == "warning":
+        elif f.get("severity") == "warning" and f.get("category") not in EXAM_LEVEL_WARNING_CATEGORIES:
             warned_ctx_ids.add(ctx_id)
 
     clean_contexts = [

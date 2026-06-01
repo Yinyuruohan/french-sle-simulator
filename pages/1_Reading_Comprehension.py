@@ -23,8 +23,10 @@ from tools.reading_question_bank import (
     upgrade_to_battle_tested as rc_upgrade_to_battle_tested,
     update_last_incorrect as rc_update_last_incorrect,
     flag_context as rc_flag_context,
+    lookup_context_ids_by_hashes as rc_lookup_ids,
+    _passage_hash as rc_passage_hash,
 )
-from tools.review_reading_exam import review_reading_exam
+from tools.review_reading_exam import review_reading_exam, EXAM_LEVEL_WARNING_CATEGORIES
 
 st.set_page_config(
     page_title="SLE Reading Comprehension",
@@ -221,15 +223,22 @@ def _render_welcome():
                     result = rc_prefill_bank(int(n),
                                              model_config=st.session_state.rc_model_config)
                 except Exception as e:
-                    st.error(f"Prefill failed: {e}")
+                    st.session_state.rc_prefill_msg = ("error", f"Prefill failed: {e}")
                 else:
                     if result["success"]:
-                        st.success(result["message"])
+                        st.session_state.rc_prefill_msg = ("success", result["message"])
                     else:
-                        st.error(result["message"])
+                        st.session_state.rc_prefill_msg = ("error", result["message"])
             st.rerun()
 
-    instant_disabled = stats["total_questions"] < int(n)
+    if "rc_prefill_msg" in st.session_state:
+        kind, msg = st.session_state.pop("rc_prefill_msg")
+        if kind == "success":
+            st.success(msg)
+        else:
+            st.error(msg)
+
+    instant_disabled = stats["unflagged_questions"] < int(n)
     col_instant, col_fresh = st.columns(2)
     with col_instant:
         if st.button(
@@ -287,7 +296,8 @@ def _render_generating():
             critical_ids = {f["context_id"] for f in review["flagged_questions"]
                             if f["severity"] == "critical"}
             warned_ids = {f["context_id"] for f in review["flagged_questions"]
-                          if f["severity"] == "warning"}
+                          if f["severity"] == "warning"
+                          and f["category"] not in EXAM_LEVEL_WARNING_CATEGORIES}
             clean_contexts = [c for c in fresh["contexts"] if c["context_id"] not in critical_ids]
             warned_contexts = [c for c in clean_contexts if c["context_id"] in warned_ids]
             reviewed_contexts = [c for c in clean_contexts if c["context_id"] not in warned_ids]
@@ -295,6 +305,18 @@ def _render_generating():
                 rc_cache_contexts(dict(fresh, contexts=reviewed_contexts), status="reviewed")
             if warned_contexts:
                 rc_cache_contexts(dict(fresh, contexts=warned_contexts), status="warned")
+
+            # Back-fill bank_context_id onto freshly-cached contexts so the flag
+            # UI works on the results page without requiring a second exam.
+            cached_contexts = reviewed_contexts + warned_contexts
+            if cached_contexts:
+                hashes = [rc_passage_hash(c["passage"]) for c in cached_contexts]
+                id_map = rc_lookup_ids(hashes)
+                for ctx in fresh["contexts"]:
+                    h = rc_passage_hash(ctx["passage"])
+                    if h in id_map:
+                        ctx["bank_context_id"] = id_map[h]
+                        ctx["original_passage_hash"] = h
 
             # Serve the fresh exam as-is (including any critically-flagged contexts,
             # so the user gets the N items they asked for; only the bank is selective).
