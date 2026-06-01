@@ -230,3 +230,124 @@ def test_assemble_spreads_across_stem_families():
     result = assemble_exam_from_cache(3)
     fams_used = [c["questions"][0]["stem_family"] for c in result["exam"]["contexts"]]
     assert sorted(fams_used) == ["main_idea", "purpose", "title"]
+
+
+def _eval_ctx(context_id, bank_context_id=None, original_passage_hash=None,
+              passage="P", is_correct=True):
+    return {
+        "context_id": context_id,
+        "passage": passage,
+        "bank_context_id": bank_context_id,
+        "original_passage_hash": original_passage_hash,
+        "question_results": [
+            {"question_id": context_id, "is_correct": is_correct,
+             "user_answer": "A", "correct_answer": "A" if is_correct else "B"}
+        ],
+    }
+
+
+def test_upgrade_promotes_reviewed_to_battle_tested():
+    import sqlite3
+    from tools.reading_question_bank import (
+        init_db, cache_contexts, assemble_exam_from_cache,
+        upgrade_to_battle_tested, DB_PATH,
+    )
+    init_db()
+    cache_contexts(_exam([_ctx(1, "P1")]))
+    assembled = assemble_exam_from_cache(1)["exam"]
+    bank_id = assembled["contexts"][0]["bank_context_id"]
+
+    evaluation = {"context_results": [_eval_ctx(1, bank_context_id=bank_id, passage="P1")]}
+    upgrade_to_battle_tested(assembled["session_id"], evaluation)
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        status = conn.execute("SELECT status FROM rc_contexts WHERE context_id = ?",
+                              (bank_id,)).fetchone()[0]
+        assert status == "battle_tested"
+    finally:
+        conn.close()
+
+
+def test_upgrade_does_not_promote_warned():
+    import sqlite3
+    from tools.reading_question_bank import (
+        init_db, cache_contexts, assemble_exam_from_cache,
+        upgrade_to_battle_tested, DB_PATH,
+    )
+    init_db()
+    cache_contexts(_exam([_ctx(1, "P1")]), status="warned")
+    assembled = assemble_exam_from_cache(1)["exam"]
+    bank_id = assembled["contexts"][0]["bank_context_id"]
+
+    evaluation = {"context_results": [_eval_ctx(1, bank_context_id=bank_id, passage="P1")]}
+    upgrade_to_battle_tested(assembled["session_id"], evaluation)
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        status = conn.execute("SELECT status FROM rc_contexts WHERE context_id = ?",
+                              (bank_id,)).fetchone()[0]
+        assert status == "warned"
+    finally:
+        conn.close()
+
+
+def test_update_last_incorrect_sets_flag_by_bank_id():
+    import sqlite3
+    from tools.reading_question_bank import (
+        init_db, cache_contexts, assemble_exam_from_cache,
+        update_last_incorrect, DB_PATH,
+    )
+    init_db()
+    cache_contexts(_exam([_ctx(1, "P1")]))
+    assembled = assemble_exam_from_cache(1)["exam"]
+    bank_id = assembled["contexts"][0]["bank_context_id"]
+
+    evaluation = {"context_results": [_eval_ctx(1, bank_context_id=bank_id,
+                                                 passage="P1", is_correct=False)]}
+    update_last_incorrect(evaluation)
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        flag = conn.execute("SELECT last_incorrect FROM rc_contexts WHERE context_id = ?",
+                            (bank_id,)).fetchone()[0]
+        assert flag == 1
+    finally:
+        conn.close()
+
+
+def test_update_last_incorrect_clears_when_all_correct():
+    import sqlite3
+    from tools.reading_question_bank import (
+        init_db, cache_contexts, assemble_exam_from_cache,
+        update_last_incorrect, DB_PATH,
+    )
+    init_db()
+    cache_contexts(_exam([_ctx(1, "P1")]))
+    assembled = assemble_exam_from_cache(1)["exam"]
+    bank_id = assembled["contexts"][0]["bank_context_id"]
+    update_last_incorrect({"context_results": [_eval_ctx(1, bank_context_id=bank_id,
+                                                          is_correct=False)]})
+    update_last_incorrect({"context_results": [_eval_ctx(1, bank_context_id=bank_id,
+                                                          is_correct=True)]})
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        flag = conn.execute("SELECT last_incorrect FROM rc_contexts WHERE context_id = ?",
+                            (bank_id,)).fetchone()[0]
+        assert flag == 0
+    finally:
+        conn.close()
+
+
+def test_flag_context_writes_tracking_file():
+    import os
+    from tools.reading_question_bank import (
+        init_db, cache_contexts, flag_context, SYSTEM_TRACKING_FILE, _passage_hash
+    )
+    init_db()
+    cache_contexts(_exam([_ctx(1, "FlagMe")]))
+    flag_context(passage_hash=_passage_hash("FlagMe"), category="Wrong answer key")
+    assert os.path.exists(SYSTEM_TRACKING_FILE)
+    with open(SYSTEM_TRACKING_FILE, encoding="utf-8") as f:
+        content = f.read()
+    assert "Wrong answer key" in content

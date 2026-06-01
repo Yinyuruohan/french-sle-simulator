@@ -239,7 +239,7 @@ def _build_exam_from_rows(rows: list) -> dict:
 
 
 def flag_context(bank_context_id: str = None, passage_hash: str = None, category: str = ""):
-    """Increment user_flags. (Tracking-file logging added in Task 6.)"""
+    """Increment user_flags and log to SYSTEM_TRACKING_FILE."""
     conn = _get_conn()
     try:
         if bank_context_id:
@@ -252,6 +252,98 @@ def flag_context(bank_context_id: str = None, passage_hash: str = None, category
                 "UPDATE rc_contexts SET user_flags = user_flags + 1 WHERE passage_hash = ?",
                 (passage_hash,),
             )
+        conn.commit()
+    finally:
+        conn.close()
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ref = bank_context_id or passage_hash or "unknown"
+    lines = [
+        f"\n## RC User Flag — Context: {ref}",
+        f"**Date:** {timestamp}",
+        f"**Category:** {category}",
+        "",
+        "---",
+        "",
+    ]
+    if not os.path.exists(SYSTEM_TRACKING_FILE):
+        header = (
+            "# System Error Tracking / Suivi des erreurs systeme\n\n"
+            "This file logs all issues flagged by the automated quality review "
+            "agent across exam sessions.\n\n---\n"
+        )
+        with open(SYSTEM_TRACKING_FILE, "w", encoding="utf-8") as f:
+            f.write(header)
+    with open(SYSTEM_TRACKING_FILE, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+def upgrade_to_battle_tested(source_session: str, evaluation: dict):
+    """Promote matched 'reviewed' rows to 'battle_tested'. 'warned' rows stay."""
+    bank_ids = set()
+    hash_ids = set()
+    for ctx_r in evaluation.get("context_results", []):
+        bank_id = ctx_r.get("bank_context_id")
+        if bank_id:
+            bank_ids.add(bank_id)
+        orig_hash = ctx_r.get("original_passage_hash")
+        p_hash = orig_hash or _passage_hash(ctx_r["passage"])
+        hash_ids.add(p_hash)
+
+    if not bank_ids and not hash_ids:
+        return
+
+    conn = _get_conn()
+    try:
+        for bank_id in bank_ids:
+            conn.execute(
+                "UPDATE rc_contexts SET status = 'battle_tested' "
+                "WHERE context_id = ? AND status = 'reviewed'",
+                (bank_id,),
+            )
+        for p_hash in hash_ids:
+            conn.execute(
+                "UPDATE rc_contexts SET status = 'battle_tested' "
+                "WHERE passage_hash = ? AND status = 'reviewed'",
+                (p_hash,),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_last_incorrect(evaluation: dict):
+    """Set last_incorrect to 1 if the single question was wrong, else 0.
+
+    Matches by bank_context_id first, then original_passage_hash, then passage_hash.
+    """
+    conn = _get_conn()
+    try:
+        for ctx_r in evaluation.get("context_results", []):
+            has_incorrect = any(
+                not q_r.get("is_correct", True)
+                for q_r in ctx_r["question_results"]
+            )
+            flag = 1 if has_incorrect else 0
+
+            bank_id = ctx_r.get("bank_context_id")
+            orig_hash = ctx_r.get("original_passage_hash")
+            if bank_id:
+                conn.execute(
+                    "UPDATE rc_contexts SET last_incorrect = ? WHERE context_id = ?",
+                    (flag, bank_id),
+                )
+            elif orig_hash:
+                conn.execute(
+                    "UPDATE rc_contexts SET last_incorrect = ? WHERE passage_hash = ?",
+                    (flag, orig_hash),
+                )
+            else:
+                p_hash = _passage_hash(ctx_r["passage"])
+                conn.execute(
+                    "UPDATE rc_contexts SET last_incorrect = ? WHERE passage_hash = ?",
+                    (flag, p_hash),
+                )
         conn.commit()
     finally:
         conn.close()
