@@ -18,7 +18,10 @@ _SENTENCE_COMPLETION_BLANK = re.compile(r"_{4,}\s*\.\s*$")
 def review_reading_exam(exam: dict) -> dict:
     """Deterministically review an RC exam.
 
-    See module docstring for severity semantics and behavior.
+    severity ∈ {'critical', 'warning'}.
+    Critical findings exclude the context from caching in prefill_bank.
+    Warning findings cause the context to be cached with status='warned'.
+    No retry — matches WE prefill_bank behavior.
     """
     flagged: list[dict] = []
     contexts = exam.get("contexts", [])
@@ -29,7 +32,7 @@ def review_reading_exam(exam: dict) -> dict:
         crit = _check_context_critical(ctx)
         flagged.extend(crit)
         ctx_id = ctx["context_id"]
-        if not any(f["context_id"] == ctx_id and f["severity"] == "critical" for f in crit):
+        if not any(f["severity"] == "critical" for f in crit):
             surviving_ids.append(ctx_id)
         flagged.extend(_check_context_warning(ctx))
 
