@@ -205,15 +205,45 @@ def _render_welcome():
 
 def _render_generating():
     n = st.session_state.get("rc_n", 5)
-    with st.spinner(f"Generating {n}-question Reading Comprehension exam…"):
-        try:
-            exam = generate_reading_exam(n, model_config=st.session_state.rc_model_config)
-        except Exception as e:
-            st.error(f"Generation failed: {e}")
-            if st.button("Retry"):
-                _go_to("welcome")
-                st.rerun()
-            return
+    exam = None
+
+    # Try cache first
+    cache_result = rc_assemble_from_cache(n)
+    cached_exam = cache_result["exam"]
+    if cached_exam is not None and cached_exam["num_questions"] >= n:
+        exam = cached_exam
+
+    # Fall back to fresh generation
+    if exam is None:
+        with st.spinner(f"Generating {n}-question Reading Comprehension exam…"):
+            try:
+                fresh = generate_reading_exam(n,
+                                              model_config=st.session_state.rc_model_config)
+            except Exception as e:
+                st.error(f"Generation failed: {e}")
+                if st.button("Retry"):
+                    _go_to("welcome")
+                    st.rerun()
+                return
+
+            # Rule-based review + cache split (no API call here — reviewer is rule-based)
+            review = review_reading_exam(fresh)
+            critical_ids = {f["context_id"] for f in review["flagged_questions"]
+                            if f["severity"] == "critical"}
+            warned_ids = {f["context_id"] for f in review["flagged_questions"]
+                          if f["severity"] == "warning"}
+            clean_contexts = [c for c in fresh["contexts"] if c["context_id"] not in critical_ids]
+            warned_contexts = [c for c in clean_contexts if c["context_id"] in warned_ids]
+            reviewed_contexts = [c for c in clean_contexts if c["context_id"] not in warned_ids]
+            if reviewed_contexts:
+                rc_cache_contexts(dict(fresh, contexts=reviewed_contexts), status="reviewed")
+            if warned_contexts:
+                rc_cache_contexts(dict(fresh, contexts=warned_contexts), status="warned")
+
+            # Serve the fresh exam as-is (including any critically-flagged contexts,
+            # so the user gets the N items they asked for; only the bank is selective).
+            exam = fresh
+
     st.session_state.rc_exam = exam
     st.session_state.rc_answers = {}
     _go_to("taking")
