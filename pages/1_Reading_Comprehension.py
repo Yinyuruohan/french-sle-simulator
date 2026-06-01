@@ -154,7 +154,7 @@ def _render_results():
         )
 
     if st.button("Try another exam"):
-        for k in ["rc_exam", "rc_answers", "rc_evaluation", "rc_n"]:
+        for k in ["rc_exam", "rc_answers", "rc_evaluation", "rc_n", "rc_source"]:
             st.session_state.pop(k, None)
         _go_to("welcome")
         st.rerun()
@@ -229,23 +229,47 @@ def _render_welcome():
                         st.error(result["message"])
             st.rerun()
 
-    if st.button("Generate exam", type="primary"):
-        st.session_state.rc_n = int(n)
-        _go_to("generating")
-        st.rerun()
+    instant_disabled = stats["total_questions"] < int(n)
+    col_instant, col_fresh = st.columns(2)
+    with col_instant:
+        if st.button(
+            "Instant exam (from bank)",
+            use_container_width=True,
+            disabled=instant_disabled,
+            help=("Not enough cached questions — prefill the bank or generate fresh."
+                  if instant_disabled else None),
+        ):
+            st.session_state.rc_n = int(n)
+            st.session_state.rc_source = "cache"
+            _go_to("generating")
+            st.rerun()
+    with col_fresh:
+        if st.button("Generate fresh (API)", type="primary", use_container_width=True):
+            st.session_state.rc_n = int(n)
+            st.session_state.rc_source = "fresh"
+            _go_to("generating")
+            st.rerun()
 
 
 def _render_generating():
     n = st.session_state.get("rc_n", 5)
+    source = st.session_state.get("rc_source", "fresh")
     exam = None
 
-    # Try cache first
-    cache_result = rc_assemble_from_cache(n)
-    cached_exam = cache_result["exam"]
-    if cached_exam is not None and cached_exam["num_questions"] >= n:
-        exam = cached_exam
+    # Cache path — only when the user explicitly chose Instant
+    if source == "cache":
+        cache_result = rc_assemble_from_cache(n)
+        cached_exam = cache_result["exam"]
+        if cached_exam is not None and cached_exam["num_questions"] >= n:
+            exam = cached_exam
+        else:
+            st.error("Not enough cached questions. Prefill the bank or use Generate fresh.")
+            if st.button("Back to setup"):
+                _go_to("welcome")
+                st.rerun()
+            return
 
-    # Fall back to fresh generation
+    # Fresh generation path
     if exam is None:
         with st.spinner(f"Generating {n}-question Reading Comprehension exam…"):
             try:
