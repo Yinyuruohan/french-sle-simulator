@@ -347,3 +347,56 @@ def update_last_incorrect(evaluation: dict):
         conn.commit()
     finally:
         conn.close()
+
+
+# Module-level wrappers so tests can monkeypatch without touching real APIs.
+def _generate_reading_exam(num_questions: int, model_config):
+    from tools.generate_reading_exam import generate_reading_exam
+    return generate_reading_exam(num_questions, model_config=model_config)
+
+
+def _review_reading_exam(exam: dict):
+    from tools.review_reading_exam import review_reading_exam
+    return review_reading_exam(exam)
+
+
+def prefill_bank(num_questions: int, model_config) -> dict:
+    """Generate + rule-based review + cache. Returns {success, message}."""
+    exam = _generate_reading_exam(num_questions, model_config=model_config)
+    review = _review_reading_exam(exam)
+
+    critical_ctx_ids = set()
+    warned_ctx_ids = set()
+    for f in review.get("flagged_questions", []):
+        ctx_id = f.get("context_id")
+        if ctx_id is None:
+            continue
+        if f.get("severity") == "critical":
+            critical_ctx_ids.add(ctx_id)
+        elif f.get("severity") == "warning":
+            warned_ctx_ids.add(ctx_id)
+
+    clean_contexts = [
+        ctx for ctx in exam.get("contexts", [])
+        if ctx["context_id"] not in critical_ctx_ids
+    ]
+    if not clean_contexts:
+        return {"success": False,
+                "message": "All generated passages had critical quality issues. Try again."}
+
+    warned_contexts = [ctx for ctx in clean_contexts if ctx["context_id"] in warned_ctx_ids]
+    reviewed_contexts = [ctx for ctx in clean_contexts if ctx["context_id"] not in warned_ctx_ids]
+
+    if reviewed_contexts:
+        cache_contexts(dict(exam, contexts=reviewed_contexts), status="reviewed")
+    if warned_contexts:
+        cache_contexts(dict(exam, contexts=warned_contexts), status="warned")
+
+    cached_n = len(clean_contexts)
+    msg = f"Cached {cached_n} passage(s) from {len(exam['contexts'])} generated"
+    if warned_contexts:
+        msg += f" ({len(warned_contexts)} warned)"
+    msg += "."
+    if critical_ctx_ids:
+        msg += f" {len(critical_ctx_ids)} passage(s) excluded due to critical issues."
+    return {"success": True, "message": msg}

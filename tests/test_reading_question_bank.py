@@ -351,3 +351,79 @@ def test_flag_context_writes_tracking_file():
     with open(SYSTEM_TRACKING_FILE, encoding="utf-8") as f:
         content = f.read()
     assert "Wrong answer key" in content
+
+
+def test_prefill_caches_clean_contexts_as_reviewed(monkeypatch):
+    """Stub generate+review so no API call happens."""
+    import tools.reading_question_bank as rqb
+    from tools.reading_question_bank import init_db, prefill_bank, get_bank_stats
+
+    init_db()
+    clean_exam = _exam([
+        _ctx(i + 1, " ".join(["mot"] * 100) + f" extra {i}")
+        for i in range(3)
+    ])
+    monkeypatch.setattr(rqb, "_generate_reading_exam",
+                        lambda n, model_config: clean_exam)
+    monkeypatch.setattr(rqb, "_review_reading_exam",
+                        lambda exam: {"flagged_questions": []})
+
+    result = prefill_bank(3, model_config=None)
+    assert result["success"] is True
+    stats = get_bank_stats()
+    assert stats["reviewed"] == 3
+    assert stats["warned"] == 0
+
+
+def test_prefill_caches_warned_when_warning_flagged(monkeypatch):
+    import tools.reading_question_bank as rqb
+    from tools.reading_question_bank import init_db, prefill_bank, get_bank_stats
+
+    init_db()
+    exam = _exam([_ctx(i + 1, " ".join(["mot"] * 100) + f" v{i}") for i in range(2)])
+    monkeypatch.setattr(rqb, "_generate_reading_exam",
+                        lambda n, model_config: exam)
+    monkeypatch.setattr(rqb, "_review_reading_exam",
+                        lambda e: {"flagged_questions": [
+                            {"context_id": 1, "severity": "warning", "category": "x", "issue": ""},
+                        ]})
+    prefill_bank(2, model_config=None)
+    stats = get_bank_stats()
+    assert stats["warned"] == 1
+    assert stats["reviewed"] == 1
+
+
+def test_prefill_excludes_critical_contexts(monkeypatch):
+    import tools.reading_question_bank as rqb
+    from tools.reading_question_bank import init_db, prefill_bank, get_bank_stats
+
+    init_db()
+    exam = _exam([_ctx(i + 1, " ".join(["mot"] * 100) + f" w{i}") for i in range(3)])
+    monkeypatch.setattr(rqb, "_generate_reading_exam",
+                        lambda n, model_config: exam)
+    monkeypatch.setattr(rqb, "_review_reading_exam",
+                        lambda e: {"flagged_questions": [
+                            {"context_id": 2, "severity": "critical", "category": "x", "issue": ""},
+                        ]})
+    result = prefill_bank(3, model_config=None)
+    assert result["success"] is True
+    stats = get_bank_stats()
+    assert stats["total_contexts"] == 2  # context_id=2 excluded
+
+
+def test_prefill_returns_failure_when_all_critical(monkeypatch):
+    import tools.reading_question_bank as rqb
+    from tools.reading_question_bank import init_db, prefill_bank, get_bank_stats
+
+    init_db()
+    exam = _exam([_ctx(i + 1, f"P {i}") for i in range(2)])
+    monkeypatch.setattr(rqb, "_generate_reading_exam",
+                        lambda n, model_config: exam)
+    monkeypatch.setattr(rqb, "_review_reading_exam",
+                        lambda e: {"flagged_questions": [
+                            {"context_id": 1, "severity": "critical", "category": "x", "issue": ""},
+                            {"context_id": 2, "severity": "critical", "category": "y", "issue": ""},
+                        ]})
+    result = prefill_bank(2, model_config=None)
+    assert result["success"] is False
+    assert get_bank_stats()["total_contexts"] == 0
