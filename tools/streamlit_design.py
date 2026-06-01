@@ -276,3 +276,130 @@ def inject_design_system() -> None:
       }
     </style>
     """)
+
+
+def _timer_html(total_seconds: int, start_ts: float) -> str:
+    return f"""
+<style>
+  #rc-timer-bar {{
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 9999;
+    background: #2563eb;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 8px 16px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    transition: background 0.5s;
+  }}
+  #rc-timer-bar.urgent {{ background: #dc2626; }}
+  #rc-timer-progress {{
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: rgba(255,255,255,0.45);
+    transition: width 1s linear;
+  }}
+  #rc-timer-modal {{
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0,0,0,0.6);
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }}
+  #rc-timer-modal-card {{
+    background: white;
+    border-radius: 16px;
+    padding: 32px 40px;
+    max-width: 420px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }}
+</style>
+
+<div id="rc-timer-bar">
+  &#9201; <span id="rc-timer-display">--:--</span>
+  <div id="rc-timer-progress" style="width:100%"></div>
+</div>
+
+<div id="rc-timer-modal">
+  <div id="rc-timer-modal-card">
+    <div style="font-size:48px;margin-bottom:16px">&#9200;</div>
+    <h2 style="margin:0 0 8px;color:#0f172a;font-size:20px;font-weight:700">
+      Temps &eacute;coul&eacute; / Time&rsquo;s up
+    </h2>
+    <p style="margin:0 0 24px;color:#334155;font-size:14px;line-height:1.65">
+      Veuillez soumettre vos r&eacute;ponses maintenant.<br>
+      Please submit your answers now.
+    </p>
+    <button
+      onclick="document.getElementById('rc-timer-modal').style.display='none'"
+      style="background:#2563eb;color:white;border:none;border-radius:10px;
+             padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer">
+      OK
+    </button>
+  </div>
+</div>
+
+<script>
+(function () {{
+  var START_TS = {start_ts:.3f};
+  var TOTAL_SECS = {total_seconds};
+
+  if (window.__rcTimerIntervalId) {{
+    clearInterval(window.__rcTimerIntervalId);
+    window.__rcTimerIntervalId = null;
+  }}
+
+  function fmt(secs) {{
+    var m = Math.floor(secs / 60);
+    var s = Math.floor(secs % 60);
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }}
+
+  function tick() {{
+    var remaining = TOTAL_SECS - (Date.now() / 1000 - START_TS);
+    var bar = document.getElementById('rc-timer-bar');
+    var display = document.getElementById('rc-timer-display');
+    var progress = document.getElementById('rc-timer-progress');
+    var modal = document.getElementById('rc-timer-modal');
+    if (!bar) return;
+
+    if (remaining <= 0) {{
+      display.textContent = '00:00';
+      progress.style.width = '0%';
+      bar.classList.add('urgent');
+      if (modal) {{ modal.style.display = 'flex'; }}
+      clearInterval(window.__rcTimerIntervalId);
+      window.__rcTimerIntervalId = null;
+      return;
+    }}
+
+    display.textContent = fmt(remaining);
+    progress.style.width = (remaining / TOTAL_SECS * 100) + '%';
+    if (remaining <= 30) {{
+      bar.classList.add('urgent');
+    }} else {{
+      bar.classList.remove('urgent');
+    }}
+  }}
+
+  tick();
+  if (TOTAL_SECS - (Date.now() / 1000 - START_TS) > 0) {{
+    window.__rcTimerIntervalId = setInterval(tick, 1000);
+  }}
+}})();
+</script>
+"""
