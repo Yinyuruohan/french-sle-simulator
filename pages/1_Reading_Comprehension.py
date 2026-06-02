@@ -55,7 +55,7 @@ def _render_taking():
 
     for ctx in exam["contexts"]:
         st.markdown(f"### Passage {ctx['context_id']}")
-        st.markdown(f"> {ctx['passage']}")
+        st.markdown(ctx['passage'])
         q = ctx["questions"][0]
         st.markdown(f"**Question {q['question_id']}.** {q['question_text']}")
         choices = [f"{letter}. {q['options'][letter]}" for letter in ["A", "B", "C", "D"]]
@@ -120,7 +120,7 @@ def _render_results():
 
     for ctx_r in ev["context_results"]:
         st.markdown(f"### Passage {ctx_r['context_id']}")
-        st.markdown(f"> {ctx_r['passage']}")
+        st.markdown(ctx_r['passage'])
         for q_r in ctx_r["question_results"]:
             tag = "✅ Correct" if q_r["is_correct"] else "❌ Incorrect"
             with st.expander(f"Question {q_r['question_id']} — {tag} · *{q_r['stem_family']}*", expanded=not q_r["is_correct"]):
