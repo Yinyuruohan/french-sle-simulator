@@ -6,8 +6,8 @@ from tools.streamlit_design import _timer_html
 
 
 def test_start_ts_embedded():
-    html = _timer_html(total_seconds=450, start_ts=1717234567.123)
-    assert "1717234567.123" in html
+    html = _timer_html(total_seconds=450, start_ts=1717234567.0)
+    assert "1717234567.0" in html
 
 
 def test_total_seconds_embedded():
@@ -21,8 +21,8 @@ def test_sticky_bar_present():
 
 
 def test_modal_present():
-    html = _timer_html(total_seconds=450, start_ts=1717234567.123)
-    assert "rc-timer-modal" in html
+    html = _timer_html(total_seconds=450, start_ts=1717234567.0)
+    assert 'id="rc-timer-modal"' in html
 
 
 def test_interval_guard_present():

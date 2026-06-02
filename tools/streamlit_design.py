@@ -279,6 +279,7 @@ def inject_design_system() -> None:
 
 
 def _timer_html(total_seconds: int, start_ts: float) -> str:
+    """Return self-contained HTML/CSS/JS timer widget. start_ts is a Unix epoch float from time.time()."""
     return f"""
 <style>
   #rc-timer-bar {{
@@ -299,6 +300,7 @@ def _timer_html(total_seconds: int, start_ts: float) -> str:
     font-weight: 700;
     box-shadow: 0 2px 8px rgba(0,0,0,0.2);
     transition: background 0.5s;
+    overflow: hidden;
   }}
   #rc-timer-bar.urgent {{ background: #dc2626; }}
   #rc-timer-progress {{
@@ -355,7 +357,7 @@ def _timer_html(total_seconds: int, start_ts: float) -> str:
 
 <script>
 (function () {{
-  var START_TS = {start_ts:.3f};
+  var START_TS = {start_ts};
   var TOTAL_SECS = {total_seconds};
 
   if (window.__rcTimerIntervalId) {{
@@ -375,7 +377,7 @@ def _timer_html(total_seconds: int, start_ts: float) -> str:
     var display = document.getElementById('rc-timer-display');
     var progress = document.getElementById('rc-timer-progress');
     var modal = document.getElementById('rc-timer-modal');
-    if (!bar) return;
+    if (!bar || !display || !progress) return;
 
     if (remaining <= 0) {{
       display.textContent = '00:00';
