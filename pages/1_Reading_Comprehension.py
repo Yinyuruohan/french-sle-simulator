@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -43,7 +44,7 @@ def _render_timer() -> None:
         st.session_state.rc_timer_start = time.time()
     exam = st.session_state.rc_exam
     total_secs = exam["num_questions"] * 90
-    st.html(_timer_html(total_secs, st.session_state.rc_timer_start))
+    components.html(_timer_html(total_secs, st.session_state.rc_timer_start), height=0)
 
 
 def _render_taking():

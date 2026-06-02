@@ -22,7 +22,12 @@ def test_sticky_bar_present():
 
 def test_modal_present():
     html = _timer_html(total_seconds=450, start_ts=1717234567.0)
-    assert 'id="rc-timer-modal"' in html
+    assert "rc-timer-modal" in html
+
+
+def test_uses_parent_document():
+    html = _timer_html(total_seconds=450, start_ts=1717234567.0)
+    assert "window.parent" in html
 
 
 def test_interval_guard_present():
