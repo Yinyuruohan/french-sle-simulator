@@ -64,6 +64,7 @@ tools/
   grader_db.py            # Reviews table: init, CRUD, filtered queries, staleness detection
   flashcard_db.py         # Shared inbox helper: add_to_inbox(); writes to flashcard/flashcard.db
   llm_evaluator.py        # LLM judge: evaluate_context() rates a context Good/Bad with critique
+  streamlit_design.py     # Shared Streamlit CSS (inject_design_system()) + RC timer (_timer_html())
 LLM_judge_prompt.md       # System prompt for the LLM evaluator judge (SLE criteria + output format)
 tests/
   test_model_config.py    # Unit tests for model_config.py (6 tests)
@@ -73,6 +74,7 @@ tests/
   test_grader_api.py      # Integration tests for grader Flask API (17 tests)
   test_grader_batch.py    # Unit + integration tests for batch export/import (28 tests)
   test_llm_evaluator.py   # Unit tests for llm_evaluator.py (4 tests)
+  test_rc_timer.py        # Unit tests for _timer_html() (7 tests)
 workflows/
   sle_exam_simulator.md   # Full SOP for the exam workflow
 contexts/
@@ -104,10 +106,11 @@ Exams use a **contexts → questions** structure:
 
 ## Key Technical Details
 
-- **AI Engine:** Any OpenAI-compatible endpoint via `openai` Python SDK. Default: DeepSeek (`base_url="https://api.deepseek.com"`, model `deepseek-v4-pro`). Per-tool overrides via `GENERATE_*`, `EVALUATE_*`, `REVIEW_*`, `EVALUATOR_*`, `FLASHCARD_*` env vars or the in-app "AI model settings" expander. `tools/model_config.py` is the single source of truth.
+- **AI Engine:** Any OpenAI-compatible endpoint via `openai` Python SDK. Default: DeepSeek (`base_url="https://api.deepseek.com"`, model `deepseek-v4-pro`). Per-tool overrides via `GENERATE_*`, `EVALUATE_*`, `REVIEW_*`, `EVALUATOR_*`, `FLASHCARD_*`, `READING_*` env vars or the in-app "AI model settings" expander. `tools/model_config.py` is the single source of truth.
 - **Flashcard app:** `flashcard/app.py` — Flask 3 server on port 5002. All REST routes, SQLite schema (`decks`, `cards`, `sessions`, `inbox`, `seed_meta`), and the React 18 + Vite 5 SPA serving (HashRouter) live in this single file. `tools/flashcard_db.py` is a lightweight shared helper (just `add_to_inbox()`, with lazy `init_db()` on first call) that lets `app.py` write vocab words to `flashcard/flashcard.db` without importing Flask. The flashcard AI uses `FLASHCARD_*` env vars (falls back to `DEEPSEEK_API_KEY` + `deepseek-v4-pro`). The Vite build output (`flashcard/static/dist/`) is committed so the server works with no Node.js tooling in production.
 - **LLM Evaluator:** `tools/llm_evaluator.py` — `evaluate_context(context_data, model_config)` calls the LLM judge (`LLM_judge_prompt.md` as system prompt) and returns `{"rating": "Good"|"Bad", "critique": "..."}`. Configured via `EVALUATOR_*` env vars (falls back to `DEEPSEEK_API_KEY` + `deepseek-v4-pro`). Uses `max_tokens=4096` to accommodate reasoning model chain-of-thought overhead.
 - **RC question bank:** `tools/reading_question_bank.py` mirrors `tools/question_bank.py` but for Reading Comprehension. Schema differs (1 question per context, `stem_family` instead of `grammar_topics`, `has_signature` flag). Reviewer is rule-based (`tools/review_reading_exam.py`) — no LLM call. Same lifecycle (`reviewed` → `battle_tested`; `warned` permanent). DB file: `reading_question_bank.db` (gitignored).
+- **RC exam timer:** `tools/streamlit_design.py:_timer_html(total_seconds, start_ts)` returns a JS blob rendered via `st.components.v1.html(height=0)`. The script runs in a same-origin iframe and injects the sticky bar + blocking modal into `window.parent.document`. Timer state lives in `rc_timer_start` (Unix epoch float, set once when entering the taking stage). Bar positioned at `top: 60px` to appear below Streamlit's toolbar. **Critical:** `st.html()` strips `<script>` tags — always use `st.components.v1.html()` for JS injection.
 - **Exam generation:** Single API call produces questions AND explanations (why_correct + grammar_rule), JSON response format, temperature 0.7, max_tokens 16000. ~50% fill-in-blank, ~50% error identification, 2-20 questions. Prompt enforces broad grammar coverage: 11 real SLE topics, no topic repeated more than twice. Explanations must not reference option letters (shuffled post-generation). Post-generation option shuffling randomizes A/B/C/D for fill-in-blank questions; error identification options are never shuffled.
 - **Evaluation:** Fully deterministic — no API call. Scores answers against the answer key and displays pre-generated explanations from exam data.
 - **Quality review:** Single unified review (`review_exam_quality()`) validates questions AND explanations at temperature 0.1. Deterministic pre-checks: duplicate options and structural mismatches (passage blanks vs question IDs, error-ID segments vs options). Only deterministic failures (`duplicate_options`, `structural_mismatch`) are critical; all 11 AI-judgment categories are capped at "warning". Contexts with warnings cache as `warned` (never upgrade to `battle_tested`). User flagging deprioritizes contexts in assembly. Critical issues trigger targeted regeneration (max 1 retry per context). All flagged issues logged to `system_error_tracking.md`.

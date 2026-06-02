@@ -165,7 +165,7 @@ These are simplified proportional thresholds scaled to the user's chosen number 
 
 - Questions are AI-generated and pass through an automated quality review, but the reviewer uses the same AI model and may not catch all errors. Questions flagged with warnings should be reviewed critically.
 - The scoring system is a simplified approximation, not the official PSC methodology.
-- No timer is enforced (the real exam is 45 minutes for 40 questions).
+- No timer is enforced for Written Expression (the real exam is 45 minutes for 40 questions). The Reading Comprehension simulator does enforce a timer (90 seconds per question).
 - Error identification questions rely on the AI correctly placing errors in bolded segments.
 
 ## Future Improvements
