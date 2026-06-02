@@ -6,14 +6,16 @@ alongside the Written Expression home page.
 """
 import os
 import sys
+import time
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.generate_reading_exam import generate_reading_exam
 from tools.grade_reading_exam import grade_reading_exam
 from tools.model_config import load_default_configs
-from tools.streamlit_design import inject_design_system
+from tools.streamlit_design import inject_design_system, _timer_html
 from tools.reading_question_bank import (
     init_db as rc_init_db,
     cache_contexts as rc_cache_contexts,
@@ -37,14 +39,23 @@ inject_design_system()
 rc_init_db()
 
 
+def _render_timer() -> None:
+    if st.session_state.rc_timer_start is None:
+        st.session_state.rc_timer_start = time.time()
+    exam = st.session_state.rc_exam
+    total_secs = exam["num_questions"] * 90
+    components.html(_timer_html(total_secs, st.session_state.rc_timer_start), height=0)
+
+
 def _render_taking():
+    _render_timer()
     exam = st.session_state.rc_exam
     st.title("📖 Reading Comprehension")
     st.caption(f"Session: {exam['session_id']} · {exam['num_questions']} questions")
 
     for ctx in exam["contexts"]:
         st.markdown(f"### Passage {ctx['context_id']}")
-        st.markdown(f"> {ctx['passage']}")
+        st.markdown(ctx['passage'])
         q = ctx["questions"][0]
         st.markdown(f"**Question {q['question_id']}.** {q['question_text']}")
         choices = [f"{letter}. {q['options'][letter]}" for letter in ["A", "B", "C", "D"]]
@@ -109,7 +120,7 @@ def _render_results():
 
     for ctx_r in ev["context_results"]:
         st.markdown(f"### Passage {ctx_r['context_id']}")
-        st.markdown(f"> {ctx_r['passage']}")
+        st.markdown(ctx_r['passage'])
         for q_r in ctx_r["question_results"]:
             tag = "✅ Correct" if q_r["is_correct"] else "❌ Incorrect"
             with st.expander(f"Question {q_r['question_id']} — {tag} · *{q_r['stem_family']}*", expanded=not q_r["is_correct"]):
@@ -156,7 +167,7 @@ def _render_results():
         )
 
     if st.button("Try another exam"):
-        for k in ["rc_exam", "rc_answers", "rc_evaluation", "rc_n", "rc_source"]:
+        for k in ["rc_exam", "rc_answers", "rc_evaluation", "rc_n", "rc_source", "rc_timer_start"]:
             st.session_state.pop(k, None)
         _go_to("welcome")
         st.rerun()
@@ -169,6 +180,7 @@ def _init_state():
         "rc_answers": {},
         "rc_evaluation": None,
         "rc_model_config": load_default_configs()["reading"],
+        "rc_timer_start": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:

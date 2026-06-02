@@ -276,3 +276,109 @@ def inject_design_system() -> None:
       }
     </style>
     """)
+
+
+def _timer_html(total_seconds: int, start_ts: float) -> str:
+    """Return JS timer widget for st.components.v1.html(height=0).
+    Injects sticky bar and modal into window.parent.document via same-origin iframe access.
+    start_ts is a Unix epoch float from time.time()."""
+    return f"""<script>
+(function () {{
+  var START_TS = {start_ts};
+  var TOTAL_SECS = {total_seconds};
+  var P = window.parent;
+  var D = P.document;
+
+  function cleanup() {{
+    ['rc-timer-style', 'rc-timer-bar', 'rc-timer-modal'].forEach(function (id) {{
+      var el = D.getElementById(id);
+      if (el) el.remove();
+    }});
+    if (P.__rcTimerIntervalId) {{
+      clearInterval(P.__rcTimerIntervalId);
+      P.__rcTimerIntervalId = null;
+    }}
+  }}
+
+  cleanup();
+  window.addEventListener('unload', cleanup);
+
+  var style = D.createElement('style');
+  style.id = 'rc-timer-style';
+  style.textContent =
+    '#rc-timer-bar{{position:fixed;top:60px;left:0;width:100%;z-index:9999;' +
+    'background:#2563eb;color:white;display:flex;align-items:center;' +
+    'justify-content:center;gap:10px;padding:8px 16px;overflow:hidden;' +
+    'font-family:"Plus Jakarta Sans",sans-serif;font-size:15px;font-weight:700;' +
+    'box-shadow:0 2px 8px rgba(0,0,0,0.2);transition:background 0.5s;}}' +
+    '#rc-timer-bar.urgent{{background:#dc2626;}}' +
+    '#rc-timer-progress{{position:absolute;bottom:0;left:0;height:3px;' +
+    'background:rgba(255,255,255,0.45);transition:width 1s linear;}}' +
+    '#rc-timer-modal{{position:fixed;inset:0;z-index:10000;' +
+    'background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;}}' +
+    '#rc-timer-modal-card{{background:white;border-radius:16px;padding:32px 40px;' +
+    'max-width:420px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.3);}}';
+  D.head.appendChild(style);
+
+  var bar = D.createElement('div');
+  bar.id = 'rc-timer-bar';
+  bar.innerHTML =
+    '&#9201; <span id="rc-timer-display">--:--</span>' +
+    '<div id="rc-timer-progress" style="width:100%"></div>';
+  D.body.appendChild(bar);
+
+  var modal = D.createElement('div');
+  modal.id = 'rc-timer-modal';
+  modal.innerHTML =
+    '<div id="rc-timer-modal-card">' +
+    '<div style="font-size:48px;margin-bottom:16px">&#9200;</div>' +
+    '<h2 style="margin:0 0 8px;color:#0f172a;font-size:20px;font-weight:700">' +
+    'Temps &eacute;coul&eacute; / Time&#39;s up</h2>' +
+    '<p style="margin:0 0 24px;color:#334155;font-size:14px;line-height:1.65">' +
+    'Veuillez soumettre vos r&eacute;ponses maintenant.<br>' +
+    'Please submit your answers now.</p>' +
+    '<button onclick="document.getElementById(\\'rc-timer-modal\\').style.display=\\'none\\'" ' +
+    'style="background:#2563eb;color:white;border:none;border-radius:10px;' +
+    'padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer">OK</button>' +
+    '</div>';
+  D.body.appendChild(modal);
+
+  function fmt(secs) {{
+    var m = Math.floor(secs / 60);
+    var s = Math.floor(secs % 60);
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }}
+
+  function tick() {{
+    var remaining = TOTAL_SECS - (Date.now() / 1000 - START_TS);
+    var bar = D.getElementById('rc-timer-bar');
+    var display = D.getElementById('rc-timer-display');
+    var progress = D.getElementById('rc-timer-progress');
+    var modal = D.getElementById('rc-timer-modal');
+    if (!bar || !display || !progress) return;
+
+    if (remaining <= 0) {{
+      display.textContent = '00:00';
+      progress.style.width = '0%';
+      bar.classList.add('urgent');
+      if (modal) modal.style.display = 'flex';
+      clearInterval(P.__rcTimerIntervalId);
+      P.__rcTimerIntervalId = null;
+      return;
+    }}
+
+    display.textContent = fmt(remaining);
+    progress.style.width = (remaining / TOTAL_SECS * 100) + '%';
+    if (remaining <= 30) {{
+      bar.classList.add('urgent');
+    }} else {{
+      bar.classList.remove('urgent');
+    }}
+  }}
+
+  tick();
+  if (TOTAL_SECS - (Date.now() / 1000 - START_TS) > 0) {{
+    P.__rcTimerIntervalId = setInterval(tick, 1000);
+  }}
+}})();
+</script>"""
