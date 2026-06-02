@@ -306,7 +306,7 @@ def _timer_html(total_seconds: int, start_ts: float) -> str:
   var style = D.createElement('style');
   style.id = 'rc-timer-style';
   style.textContent =
-    '#rc-timer-bar{{position:fixed;top:0;left:0;width:100%;z-index:9999;' +
+    '#rc-timer-bar{{position:fixed;top:60px;left:0;width:100%;z-index:9999;' +
     'background:#2563eb;color:white;display:flex;align-items:center;' +
     'justify-content:center;gap:10px;padding:8px 16px;overflow:hidden;' +
     'font-family:"Plus Jakarta Sans",sans-serif;font-size:15px;font-weight:700;' +
@@ -333,11 +333,11 @@ def _timer_html(total_seconds: int, start_ts: float) -> str:
     '<div id="rc-timer-modal-card">' +
     '<div style="font-size:48px;margin-bottom:16px">&#9200;</div>' +
     '<h2 style="margin:0 0 8px;color:#0f172a;font-size:20px;font-weight:700">' +
-    'Temps &eacute;coul&eacute; / Time\'s up</h2>' +
+    'Temps &eacute;coul&eacute; / Time&#39;s up</h2>' +
     '<p style="margin:0 0 24px;color:#334155;font-size:14px;line-height:1.65">' +
     'Veuillez soumettre vos r&eacute;ponses maintenant.<br>' +
     'Please submit your answers now.</p>' +
-    '<button onclick="document.getElementById(\'rc-timer-modal\').style.display=\'none\'" ' +
+    '<button onclick="document.getElementById(\\'rc-timer-modal\\').style.display=\\'none\\'" ' +
     'style="background:#2563eb;color:white;border:none;border-radius:10px;' +
     'padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer">OK</button>' +
     '</div>';
