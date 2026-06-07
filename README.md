@@ -32,7 +32,7 @@ Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compa
 - **LLM Grader** — standalone expert review interface for subject-matter experts to rate and annotate AI-generated exam content before it reaches learners
 - **Batch Excel export/import** — download the current filtered view as `.xlsx`, edit ratings in Excel (with Good/Bad dropdown), and upload back to bulk-update reviews
 - **Flashcard Study app** — vocabulary drill companion (port 5002):
-  - Vocab inbox: save unknown words directly from the exam's sidebar Vocab Note → AI generates front/back definitions → review and commit to a deck
+  - Vocab inbox: save unknown words directly from the sidebar Vocab Note (available in both the Written Expression and Reading Comprehension exams) → AI generates front/back definitions → review and commit to a deck
   - Three study modes: flip cards, multiple-choice (MCQ), and type-in
   - Mastery tracking with progress bars and per-session history
   - React 18 + Vite SPA served by Flask; same design language as the exam simulator

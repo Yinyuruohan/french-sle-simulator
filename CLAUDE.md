@@ -17,7 +17,7 @@ This app generates realistic French SLE Written Expression exam questions via a 
 - `tools/question_bank.py` — SQLite question bank: cache validated contexts, assemble instant exams
 - `tools/reading_question_bank.py` — RC SQLite question bank (sibling of `question_bank.py`); caches RC passages and assembles instant exams
 - `tools/review_reading_exam.py` — rule-based RC reviewer (no LLM); used by `reading_question_bank.prefill_bank`
-- `tools/flashcard_db.py` — shared inbox helper; lets `app.py` write vocab words to `flashcard/flashcard.db` without requiring the flashcard server to be running
+- `tools/flashcard_db.py` — shared inbox helper; lets `app.py` and the RC page write vocab words to `flashcard/flashcard.db` without requiring the flashcard server to be running
 - `workflows/sle_exam_simulator.md` — full SOP for the exam workflow
 
 ## The WAT Architecture
@@ -64,7 +64,7 @@ tools/
   grader_db.py            # Reviews table: init, CRUD, filtered queries, staleness detection
   flashcard_db.py         # Shared inbox helper: add_to_inbox(); writes to flashcard/flashcard.db
   llm_evaluator.py        # LLM judge: evaluate_context() rates a context Good/Bad with critique
-  streamlit_design.py     # Shared Streamlit CSS (inject_design_system()) + RC timer (_timer_html())
+  streamlit_design.py     # Shared Streamlit CSS (inject_design_system()) + RC timer (_timer_html()) + vocab note sidebar (_render_vocab_note_sidebar())
 LLM_judge_prompt.md       # System prompt for the LLM evaluator judge (SLE criteria + output format)
 tests/
   test_model_config.py    # Unit tests for model_config.py (6 tests)

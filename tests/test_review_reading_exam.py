@@ -90,12 +90,21 @@ def test_clean_critical_only_exam_returns_no_critical():
 
 # --- Warning rules (per-context) ---
 
-def test_word_count_under_80_flagged_warning():
+def test_word_count_under_15_flagged_warning():
     short_passage = "Texte trop court."  # 3 words
     ctx = _ctx(1, short_passage)
     result = review_reading_exam(_exam([ctx]))
     cats = _categories(result, severity="warning")
     assert "word_count_out_of_range" in cats
+
+
+def test_word_count_short_notice_not_flagged():
+    """Brief 15-40 word notices are valid per the spec and must not be flagged."""
+    notice = " ".join(["mot"] * 30)
+    ctx = _ctx(1, notice)
+    result = review_reading_exam(_exam([ctx]))
+    cats = _categories(result, severity="warning")
+    assert "word_count_out_of_range" not in cats
 
 
 def test_word_count_over_130_flagged_warning():
@@ -124,26 +133,10 @@ def test_option_length_disparity_flagged_warning():
 
 # --- Warning rules (N-level) — attached to every surviving context ---
 
-def test_signature_missing_for_n5_flagged_on_all_contexts():
-    """N=5, no has_signature=True → every context gets the warning."""
+def test_signature_absent_never_flagged():
+    """Signatures are rare and optional per the spec; their absence is never a finding."""
     passage = " ".join(["mot"] * 100)
     contexts = [_ctx(i + 1, passage, has_signature=False) for i in range(5)]
-    result = review_reading_exam(_exam(contexts))
-    sig_ctx_ids = sorted({f["context_id"] for f in result["flagged_questions"]
-                          if f["category"] == "signature_missing"})
-    assert sig_ctx_ids == [1, 2, 3, 4, 5]
-
-
-def test_signature_present_for_n5_not_flagged():
-    passage = " ".join(["mot"] * 100)
-    contexts = [_ctx(i + 1, passage, has_signature=(i == 0)) for i in range(5)]
-    result = review_reading_exam(_exam(contexts))
-    assert "signature_missing" not in _categories(result)
-
-
-def test_signature_missing_for_n_lt_5_not_flagged():
-    passage = " ".join(["mot"] * 100)
-    contexts = [_ctx(i + 1, passage) for i in range(4)]
     result = review_reading_exam(_exam(contexts))
     assert "signature_missing" not in _categories(result)
 
@@ -170,7 +163,7 @@ def test_answer_key_clustering_below_70pct_not_flagged():
 def test_stem_family_overuse_for_n6_flagged():
     """N=6, ceil(6/3)=2, so 3 same family triggers the warning."""
     passage = " ".join(["mot"] * 100)
-    families = ["main_idea"] * 3 + ["title", "purpose", "genre"]
+    families = ["main_idea"] * 3 + ["best_title", "intent_purpose", "source_identification"]
     contexts = [_ctx(i + 1, passage, stem_family=f) for i, f in enumerate(families)]
     result = review_reading_exam(_exam(contexts))
     overuse = [f["context_id"] for f in result["flagged_questions"]
@@ -181,7 +174,7 @@ def test_stem_family_overuse_for_n6_flagged():
 def test_stem_family_overuse_at_threshold_not_flagged():
     """N=6, 2 same family is at ceil(6/3) = 2 → NOT > 2 → no flag."""
     passage = " ".join(["mot"] * 100)
-    families = ["main_idea", "main_idea", "title", "purpose", "genre", "vocabulary"]
+    families = ["main_idea", "main_idea", "best_title", "intent_purpose", "source_identification", "vocabulary"]
     contexts = []
     for i, f in enumerate(families):
         if f == "vocabulary":
