@@ -7,6 +7,8 @@ import streamlit as st
 
 from tools.flashcard_db import add_to_inbox
 
+FLASHCARD_URL = "http://localhost:5002"
+
 
 def inject_design_system() -> None:
     """Inject global design system CSS matching the landing page aesthetic."""
@@ -384,6 +386,50 @@ def _timer_html(total_seconds: int, start_ts: float) -> str:
   }}
 }})();
 </script>"""
+
+
+def _render_top_nav(active: str = "home") -> str:
+    """Return self-contained HTML for the shared top navigation bar.
+
+    `active` is one of "home" | "writing" | "reading" and controls which
+    item is highlighted. Rendered inline via st.html() — pure HTML/CSS, no
+    JS. Also hides Streamlit's auto-generated sidebar page list so there is
+    exactly one navigation surface.
+    """
+    def cls(name: str) -> str:
+        return "sle-nav-link active" if name == active else "sle-nav-link"
+
+    return f"""
+    <style>
+      [data-testid="stSidebarNav"] {{ display: none !important; }}
+      .sle-topnav {{
+        display: flex; align-items: center; gap: 22px;
+        background: #ffffff; border: 1px solid #e2e8f0;
+        border-radius: 12px; padding: 12px 20px; margin-bottom: 20px;
+        box-shadow: 0 2px 8px rgba(37,99,235,0.06);
+        font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+      }}
+      .sle-topnav .sle-brand {{
+        font-weight: 800; font-size: 15px; color: #0f172a;
+        text-decoration: none; margin-right: auto; letter-spacing: -0.02em;
+      }}
+      .sle-topnav .sle-nav-link {{
+        font-weight: 600; font-size: 14px; color: #64748b;
+        text-decoration: none; padding: 6px 2px;
+        border-bottom: 2px solid transparent; transition: color .15s;
+      }}
+      .sle-topnav .sle-nav-link:hover {{ color: #2563eb; }}
+      .sle-topnav .sle-nav-link.active {{
+        color: #2563eb; border-bottom-color: #2563eb;
+      }}
+    </style>
+    <div class="sle-topnav">
+      <a class="sle-brand" href="/" target="_self">🇨🇦 SLE Prep</a>
+      <a class="{cls('writing')}" href="/?goto=writing" target="_self">Writing</a>
+      <a class="{cls('reading')}" href="/Reading_Comprehension" target="_self">Reading</a>
+      <a class="sle-nav-link" href="{FLASHCARD_URL}" target="_blank">Flashcards</a>
+    </div>
+    """
 
 
 def _render_vocab_note_sidebar(source: str = 'exam') -> None:
