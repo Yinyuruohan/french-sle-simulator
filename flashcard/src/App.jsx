@@ -6,6 +6,7 @@ import DeckView from './views/DeckView.jsx';
 import StudySession from './views/StudySession.jsx';
 import Inbox from './views/Inbox.jsx';
 import Progress from './views/Progress.jsx';
+import TopNav from './components/TopNav.jsx';
 
 export default function App() {
   const [inboxCount, setInboxCount] = useState(0);
@@ -43,6 +44,7 @@ export default function App() {
       </aside>
 
       <main className="main">
+        <TopNav active="flashcards" />
         <Routes>
           <Route path="/" element={<Dashboard onInboxChange={refreshInbox} />} />
           <Route path="/deck/:id" element={<DeckView />} />
