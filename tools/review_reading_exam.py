@@ -17,7 +17,6 @@ _SENTENCE_COMPLETION_BLANK = re.compile(r"_{4,}\s*\.\s*$")
 # These warning categories are evaluated at the exam level (not per-context) and
 # should not cause individual clean passages to be cached as 'warned'.
 EXAM_LEVEL_WARNING_CATEGORIES = frozenset({
-    "signature_missing",
     "answer_key_clustering",
     "stem_family_overuse",
 })
@@ -106,12 +105,12 @@ def _check_context_warning(ctx: dict) -> list[dict]:
     options = q["options"]
 
     word_count = len(passage.split())
-    if word_count < 80 or word_count > 130:
+    if word_count < 15 or word_count > 130:
         findings.append({
             "context_id": ctx_id,
             "severity": "warning",
             "category": "word_count_out_of_range",
-            "issue": f"word count {word_count} (expected 80-130)",
+            "issue": f"word count {word_count} (expected 15-130)",
         })
 
     lengths = [len(options[k].strip()) for k in ("A", "B", "C", "D")]
@@ -144,9 +143,6 @@ def _check_exam_level_warnings(contexts: list[dict],
                 "category": category,
                 "issue": issue,
             })
-
-    if n >= 5 and not any(ctx.get("has_signature") for ctx in contexts):
-        _attach("signature_missing", f"N={n} with no signature passage")
 
     if n >= 4:
         letter_counts: dict[str, int] = {}

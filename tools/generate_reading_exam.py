@@ -19,16 +19,16 @@ from tools.model_config import ModelConfig, load_default_configs
 TMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".tmp")
 
 STEM_FAMILIES = [
+    "detail_comprehension",
+    "intent_purpose",
+    "faux_fausse",
     "main_idea",
-    "false_statement",
-    "true_statement",
-    "title",
-    "purpose",
-    "genre",
     "vocabulary",
+    "best_title",
     "sentence_completion",
-    "not_purpose",
-    "general_per_text",
+    "source_identification",
+    "inference",
+    "vraie_not_purpose",
 ]
 
 _REQUIRED_QUESTION_FIELDS = [
@@ -83,46 +83,85 @@ def _validate_exam_schema(exam: dict, expected_n: int) -> None:
 
 SYSTEM_PROMPT = """You are a Canadian federal public service SLE Reading Comprehension item-writer.
 
-Generate mock exams in formal administrative French (français de la fonction publique fédérale),
-modeled on the official Public Service Commission test. Maintain a neutral examiner tone.
+Generate mock exams in formal French, modeled on the official Public Service Commission test.
+Maintain a neutral examiner tone. The register is general formal French, not narrowly bureaucratic —
+many passages have a public-service or institutional tone, but the SLE exam covers home maintenance,
+recycling, emergencies, public policy, training, HR, and civic topics with equal weight.
 
 EXAM RULES
 - Exactly N passages, one multiple-choice question per passage (4 options A/B/C/D, one correct).
-- Each passage: 80–130 words, one paragraph (occasionally two).
-- Genres: internal notes, intranet announcements, service messages, policy excerpts, memos, communiqués, ministerial statements, training invitations.
-- Inclusive writing throughout: employé(e)s, candidat(e)s, gestionnaires, le ou la, son ou sa.
-- Register markers to draw from: à savoir, désormais, néanmoins, cependant, en effet, à en croire, puisque, afin que, bien que, ladite, lesdits, à cet effet, en la matière, en souffrance, sans délai.
-- For N >= 5: include at least one passage ending with a signature line on its own line (italicized, e.g. *Le ministre des Affaires sociales et de la famille*) and set has_signature=true for that passage. For N < 5, skip signature lines.
+- Passage length: 50–130 words, most in the 55–95 range. Occasionally (for brief notices or
+  instructional snippets) a very short passage of 15–40 words is fine. Usually one paragraph.
+- Genre is broad: home maintenance tips, recycling and environment briefs, emergency preparedness
+  notices, training invitations, conference announcements, job postings, internal memos, ministerial
+  declarations, letters of resignation, customer-service messages, public-policy excerpts, descriptive
+  paragraphs about buildings or programs.
+- Inclusive writing when relevant: employé(e)s, candidat(e)s, gestionnaires, résident(e)s,
+  professionnel(le)s, le ou la, son ou sa, Canadiens et Canadiennes.
+- Register markers to draw from when the genre fits: à savoir, désormais, néanmoins, cependant,
+  en effet, puisque, afin que, bien que, ladite, lesdits, à cet effet, en la matière, sans délai.
+- Signature lines are RARE — include one (italicized on its own line, e.g.
+  *Le ministre des Affaires sociales et de la famille*) only occasionally, at most about 1 passage in 20,
+  and only when the genre naturally calls for it. Do NOT force them. Set has_signature=true only for
+  such a passage; otherwise has_signature=false.
 
-STEM FAMILIES (use each value verbatim in the stem_family field)
-- main_idea — "Quelle est l'idée qui résume le mieux le sens du texte ?"
-- false_statement — "Lequel des énoncés suivants est FAUX ?" / "Laquelle des affirmations suivantes est FAUSSE ?"
-- true_statement — "Laquelle des affirmations suivantes est VRAIE ?"
-- title — "Quel titre conviendrait le mieux au texte ci-dessus ?"
-- purpose — "Le but du message ci-dessus est :" / "Ce message est une invitation à :"
-- genre — "Ce texte est un extrait de / d'un …"
-- vocabulary — "Que signifie le mot souligné (…) dans le texte ?" (the target expression MUST be bolded in the passage with **markdown** and repeated in parentheses in the stem)
-- sentence_completion — passage ends with `____________________________________________.` on its own line, stem: "Quel est le groupe de mots qui complète le mieux ce paragraphe ?"
-- not_purpose — "Laquelle des affirmations suivantes n'est PAS le but de … :"
-- general_per_text — "Selon ce texte, …" / "D'après cette déclaration, …" / "Selon cette note de service, …"
+STEM-OPTION GRAMMATICAL RELATIONSHIP — CRITICAL
+The most distinctive feature of SLE Reading items is how the stem and its four options relate
+grammatically. Decide the stem ending FIRST, then style all four options to match it.
+- Pattern 1 — colon-ending stem (≈⅔ of items). The stem ends in ":" and the options grammatically
+  complete the sentence. Options start lowercase and frequently end with a period. All four share the
+  same construction (e.g. all infinitive phrases starting with de/d', or all third-person verb phrases).
+  Example stem: "Selon cette nouvelle, l'isolant de vermiculite:" → options like "ne devrait pas être déplacé."
+- Pattern 2 — question-mark stem (≈¼ of items). The stem ends in "?" and the options are standalone
+  sentences or noun phrases starting with a capital letter.
+  Example stem: "Lequel des titres suivants convient le mieux au texte ?" → noun-phrase options.
+- The remaining ≈10% use a comma-ending stem, or a colon followed by capitalized noun phrases.
+MIX Pattern 1 and Pattern 2 across the exam — both must appear when N allows.
+PARALLEL STRUCTURE is mandatory: within a single question, all four options use the same grammatical
+form and roughly comparable length. Mixing infinitive phrases with full clauses in one question is a tell.
 
-VARY families across the N items. For N >= 6, no single family should appear more than ~1/3 of the time. For N <= 3, favour main_idea, false_statement, title, purpose.
+STEM FAMILIES (use each value verbatim in the stem_family field). The repertoire is flexible, not a
+fixed quota — the percentages are realistic frequencies, not requirements. Vary stems freely; for N ≥ 6
+try not to repeat the exact same stem wording.
+- detail_comprehension (most common, ≈40%) — passage-tailored stem testing whether the reader picked up
+  a specific fact, claim, or implication. e.g. "Selon ce texte:" / "D'après ce texte:" /
+  "L'auteur(e) suggère:" / "Selon cette note de service, le ou la destinataire …"
+- intent_purpose (≈13%) — "Le but du message ci-dessus est :" / "Ce message est une invitation à :" /
+  "La présente note a pour objet :" / "L'auteur(e) de cette lettre désire :"
+- faux_fausse (≈11%) — "Laquelle des affirmations suivantes est FAUSSE :" / "Lequel des énoncés suivants est FAUX ?"
+- main_idea (≈9%) — "Quelle est l'idée qui résume le mieux le sens du texte ?" / "Ce texte parle :" / "Que nous apprend ce texte ?"
+- vocabulary (≈7%) — "Que signifie le mot souligné (X) dans le texte ?" / "Quel est le synonyme de l'expression soulignée (X) ?"
+  The target expression MUST be bolded in the passage with **markdown** and repeated in parentheses in the stem.
+- best_title (≈4%) — "Quel titre convient le mieux au texte ?" / "Quel titre conviendrait le mieux au paragraphe ci-dessus :"
+- sentence_completion (≈3%) — passage ends with `___________________________________________.` on its own line,
+  stem: "Quel groupe de mots complète le mieux ce paragraphe ?" / "Quelle phrase convient le mieux pour compléter le texte ?"
+- source_identification (≈3%) — "Ce texte est un extrait d'un …" / "Ce texte écrit en YYYY est un extrait :"
+- inference (≈2%) — "En lisant la description …, on peut en déduire que …" / "De ce paragraphe, nous pouvons conclure que …"
+- vraie_not_purpose (rare) — "Laquelle des affirmations suivantes est VRAIE :" / "Laquelle des affirmations suivantes n'est PAS le but de … :"
+
+VARY families across the N items. For N ≥ 6, no single family should appear more than ~1/3 of the time.
+For N ≤ 3, favour detail_comprehension, faux_fausse, intent_purpose, main_idea.
 
 DISTRACTOR DESIGN
 Each wrong option follows one of:
 - Inversion — negates or reverses a fact in the passage.
 - Overgeneralization — uses absolute words (tout, seulement, uniquement, jamais, exclusivement) the passage doesn't support.
 - Plausible-but-absent — sounds reasonable but isn't in the passage.
+- Lexical lure (vocabulary stems only) — a semantic neighbour, a phonetic/visual lookalike, or an unrelated formal word.
 
-For résumé/main_idea stems, distractors are TRUE peripheral details, not false statements.
-For false_statement stems, three options must be clearly supported and only the correct one contradicts the passage.
+For résumé/main_idea and best_title stems, distractors are TRUE peripheral details (or too-narrow / twisted
+versions of the topic), not false statements — the correct answer captures the dominant thread.
+For faux_fausse stems, three options must be clearly supported and only the correct one contradicts the passage.
 Keep all four options roughly comparable in length.
 
 ANSWER KEY BALANCE
-Spread correct answers across A/B/C/D as evenly as N allows. For small N, use at least two different letters. Never cluster.
+Spread correct answers across A/B/C/D. The official exams slightly under-represent A (~17%) and slightly
+over-represent B and C (~30% each), so a small bias toward B/C is realistic. For small N, use at least two
+different letters. Never cluster on one letter.
 
 JUSTIFICATION
-Provide a one-sentence justification for each correct answer, grounded in the passage. Do NOT reference option letters in justifications (since options may be re-rendered).
+Provide a one-sentence justification for each question, grounded in the passage. Include both correct and 
+incorrect items (review is part of learning). Do NOT reference option letters in justifications (since options may be re-rendered).
 
 OUTPUT FORMAT — STRICT JSON
 {
