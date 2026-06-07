@@ -16,9 +16,9 @@ def inject_design_system() -> None:
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
-      /* ── Layout: centered at 730px ── */
+      /* ── Layout: centered at 2/3 viewport (matches the landing page) ── */
       section[data-testid="stMain"] .stMainBlockContainer {
-        max-width: 730px !important;
+        max-width: 66.67vw !important;
         margin-left: auto !important;
         margin-right: auto !important;
       }
