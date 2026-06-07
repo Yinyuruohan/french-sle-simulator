@@ -50,6 +50,15 @@ def go_to(stage):
     st.session_state.stage = stage
 
 
+def _resolve_initial_stage(current_stage, query_params):
+    """Jump into the writing setup stage when the user arrives via the
+    top-nav Writing link (?goto=writing) from the welcome page. Mid-flow
+    stages are never overridden."""
+    if current_stage == "welcome" and query_params.get("goto") == "writing":
+        return "setup"
+    return current_stage
+
+
 def _use_twothirds_layout():
     """Constrain the page to 2/3 of the viewport width, centered."""
     st.html("""
@@ -1018,6 +1027,11 @@ def render_results():
 
 # ── Router ───────────────────────────────────────────────────────────────────
 
+_resolved = _resolve_initial_stage(st.session_state.stage, st.query_params)
+if _resolved != st.session_state.stage:
+    st.session_state.stage = _resolved
+    if "goto" in st.query_params:
+        del st.query_params["goto"]
 stage = st.session_state.stage
 
 if stage == "welcome":
