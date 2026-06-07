@@ -52,20 +52,20 @@ def inject_design_system() -> None:
       }
       h3 {
         font-family: 'Plus Jakarta Sans', sans-serif !important;
-        font-size: 15px !important;
+        font-size: 18px !important;
         font-weight: 700 !important;
         color: #1e293b !important;
       }
       h4 {
         font-family: 'Plus Jakarta Sans', sans-serif !important;
-        font-size: 14px !important;
+        font-size: 16px !important;
         font-weight: 600 !important;
         color: #334155 !important;
       }
       p, li, label, .stMarkdown {
         font-family: 'Plus Jakarta Sans', sans-serif !important;
         color: #334155 !important;
-        font-size: 14px !important;
+        font-size: 16px !important;
         line-height: 1.65 !important;
       }
 
