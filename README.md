@@ -2,7 +2,7 @@
 
 An AI-powered practice tool for the Canadian federal Public Service Commission's **Second Language Evaluation (SLE) — Test of Written Expression**. Generates realistic exam questions, grades answers, and provides detailed French grammar feedback.
 
-Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compatible AI endpoint (default: DeepSeek) and Streamlit as the web UI. Includes a standalone **LLM Grader** expert review interface for quality-assuring AI-generated content, and a **Flashcard Study app** for drilling vocabulary encountered during exam practice.
+Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compatible AI endpoint (default: DeepSeek) and Streamlit as the web UI. The same app also includes a **Reading Comprehension** practice mode (Compréhension de l'écrit). Ships with a standalone **LLM Grader** expert review interface for quality-assuring AI-generated content, and a **Flashcard Study app** for drilling vocabulary encountered during exam practice.
 
 ## Features
 
@@ -12,6 +12,7 @@ Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compa
 - **Canadian federal workplace contexts** — emails, memos, policies, meeting invitations
 - **Bilingual interface** (English + French)
 - **Unified home & shared navigation** — a single landing page presents all three tools (Writing Expression, Reading Comprehension, Flashcards) as equal entry points, and a shared top nav bar on every screen lets you switch between them in one click
+- **Reading Comprehension mode** — a separate timed exam (Compréhension de l'écrit) modeled on the official PSC reading test: formal French passages with multiple-choice questions, an on-screen countdown timer, its own SQLite question bank, and a fast rule-based quality reviewer (no extra API call)
 - **Configurable exam length** — 2 to 20 questions
 - **Randomized answer positions** — correct answers are shuffled across A/B/C/D to prevent guessing patterns
 - **Configurable AI model** — use any OpenAI-compatible endpoint (DeepSeek, OpenAI, Gemini, Ollama...) independently for generation and review — via `.env` or the in-app settings expander
@@ -42,7 +43,9 @@ Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compa
 
 ```
 french_sle_simulator/
-├── app.py                           # Streamlit entry point (4 stages: welcome -> setup -> exam -> results)
+├── app.py                           # Streamlit entry: unified home + Written Expression (welcome -> setup -> exam -> results)
+├── pages/
+│   └── 1_Reading_Comprehension.py   # Reading Comprehension exam mode (timed; sibling Streamlit page)
 ├── grader/
 │   ├── app.py                       # Flask app: REST API + static SPA serving (port 5001)
 │   ├── batch.py                     # Batch Excel export/import: export_to_excel(), import_from_excel()
@@ -57,7 +60,11 @@ french_sle_simulator/
 │   ├── src/                         # React 18 + Vite 5 SPA source
 │   │   ├── main.jsx                 # Entry point + HashRouter + layout
 │   │   ├── App.jsx                  # Root layout: left sidebar + shared cross-app top nav
+│   │   ├── api.js                   # REST client for the Flask backend
+│   │   ├── index.css                # SPA styles (shared blue / Plus Jakarta Sans tokens)
 │   │   ├── components/
+│   │   │   ├── Modal.jsx            # Reusable modal dialog
+│   │   │   ├── Toast.jsx            # Toast notifications
 │   │   │   └── TopNav.jsx           # Shared cross-app top nav (links to Writing/Reading on :8501)
 │   │   └── views/
 │   │       ├── Dashboard.jsx        # Deck grid + create/delete decks
@@ -68,28 +75,45 @@ french_sle_simulator/
 │   └── static/dist/                 # Vite build output (committed, served by Flask)
 ├── tools/
 │   ├── model_config.py              # ModelConfig dataclass + load_default_configs() — model settings
-│   ├── generate_exam.py             # AI API: generate exam questions + explanations + option shuffling
-│   ├── evaluate_exam.py             # Deterministic grading using pre-generated explanations
+│   ├── generate_exam.py             # AI API: generate WE questions + explanations + option shuffling
+│   ├── evaluate_exam.py             # Deterministic WE grading using pre-generated explanations
 │   ├── review_exam.py               # AI API: unified QA review of questions and explanations
-│   ├── question_bank.py             # SQLite question bank: cache, assemble, prefill, flag
+│   ├── question_bank.py             # SQLite WE question bank: cache, assemble, prefill, flag
+│   ├── generate_reading_exam.py     # AI API: generate Reading Comprehension passages + questions
+│   ├── grade_reading_exam.py        # Deterministic RC grading
+│   ├── reading_question_bank.py     # SQLite RC question bank (sibling of question_bank.py)
+│   ├── review_reading_exam.py       # Rule-based RC reviewer (no LLM call)
+│   ├── llm_evaluator.py             # LLM judge: evaluate_context() rates a context Good/Bad
+│   ├── streamlit_design.py          # Shared CSS + RC timer + vocab note sidebar + shared top nav
 │   ├── grader_db.py                 # Reviews table: init, CRUD, filtered queries, staleness detection
 │   └── flashcard_db.py              # Shared inbox helper: add_to_inbox() writes to flashcard/flashcard.db
-├── tests/
-│   ├── test_model_config.py         # Tests for model_config.py (6 tests)
-│   ├── test_generate_exam.py        # Tests for generate_exam.py (3 tests)
-│   ├── test_question_bank.py        # Tests for question_bank.py (17 tests)
-│   ├── test_grader_db.py            # Tests for grader_db.py (19 tests)
-│   ├── test_grader_api.py           # Integration tests for grader Flask API (11 tests)
-│   ├── test_grader_batch.py         # Unit + integration tests for batch export/import (28 tests)
-│   ├── test_top_nav.py              # Tests for shared top nav _render_top_nav() (7 tests)
-│   └── test_app_nav.py              # Tests for ?goto stage routing _resolve_initial_stage() (6 tests)
+├── tests/                           # pytest suite — 231 tests across 18 modules
+│   ├── test_model_config.py         # model_config.py (8 tests)
+│   ├── test_generate_exam.py        # generate_exam.py wiring (6 tests)
+│   ├── test_evaluate_exam.py        # evaluate_exam.py (4 tests)
+│   ├── test_review_exam.py          # review_exam.py (5 tests)
+│   ├── test_question_bank.py        # question_bank.py (28 tests)
+│   ├── test_generate_reading_exam.py # generate_reading_exam.py (14 tests)
+│   ├── test_grade_reading_exam.py   # grade_reading_exam.py (11 tests)
+│   ├── test_reading_question_bank.py # reading_question_bank.py (24 tests)
+│   ├── test_review_reading_exam.py  # review_reading_exam.py (15 tests)
+│   ├── test_rc_timer.py             # _timer_html() RC timer (7 tests)
+│   ├── test_llm_evaluator.py        # llm_evaluator.py (4 tests)
+│   ├── test_grader_db.py            # grader_db.py (24 tests)
+│   ├── test_grader_api.py           # grader Flask API (18 tests)
+│   ├── test_grader_batch.py         # batch export/import (28 tests)
+│   ├── test_flashcard_db.py         # flashcard_db.py inbox helper (5 tests)
+│   ├── test_flashcard_api.py        # flashcard Flask API (17 tests)
+│   ├── test_top_nav.py              # shared top nav _render_top_nav() (7 tests)
+│   └── test_app_nav.py              # ?goto stage routing _resolve_initial_stage() (6 tests)
 ├── workflows/
 │   ├── sle_exam_simulator.md        # SOP for the exam simulator workflow
 │   └── llm_grader.md               # SOP for the LLM Grader expert review workflow
 ├── contexts/
 │   └── fr-written-test-booklet-100919.pdf  # Official PSC test reference
 ├── .tmp/                            # Generated exams + feedback (disposable)
-├── question_bank.db                 # SQLite question bank cache (gitignored, auto-created)
+├── question_bank.db                 # SQLite WE question bank cache (gitignored, auto-created)
+├── reading_question_bank.db         # SQLite RC question bank cache (gitignored, auto-created)
 ├── user_error_tracking.md           # Persistent user error log (auto-created)
 ├── system_error_tracking.md         # Persistent system QA log (auto-created)
 ├── .env                             # API keys (gitignored)
@@ -137,6 +161,8 @@ french_sle_simulator/
 3. **Generation** (fresh only) — AI generates questions and explanations in one call; options are randomized; a unified QA review validates quality and regenerates any critical contexts
 4. **Answer questions** — select A/B/C/D for each question across multiple contexts
 5. **Results** — score, SLE level estimate, per-question grammar explanations; flag any questionable contexts
+
+**Reading Comprehension** runs in the same app (reachable from the shared top nav): pick a question count, take a timed exam of formal French passages with multiple-choice questions, then get a scored result with justifications. It has its own question bank and a rule-based reviewer, so cached RC exams need no API call.
 
 ## API Call Summary
 
