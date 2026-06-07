@@ -29,7 +29,7 @@ streamlit run app.py
 Then open the URL shown in the terminal (typically `http://localhost:8501`).
 
 **Model configuration** (`.env`):
-- `DEEPSEEK_API_KEY` — used by all three tools as the default key (with `base_url=https://api.deepseek.com`, model `deepseek-chat`)
+- `DEEPSEEK_API_KEY` — used by all three tools as the default key (with `base_url=https://api.deepseek.com`, model `deepseek-v4-pro`)
 - Optional per-tool overrides: `GENERATE_API_KEY/BASE_URL/MODEL`, `REVIEW_API_KEY/BASE_URL/MODEL`
 - Note: `EVALUATE_*` env vars are defined in `model_config.py` but have no effect — `evaluate_exam.py` makes no API call
 - Any OpenAI-compatible endpoint is supported (e.g. Gemini, OpenAI, local Ollama)
@@ -37,7 +37,7 @@ Then open the URL shown in the terminal (typically `http://localhost:8501`).
 
 ## Workflow Steps
 
-1. **Welcome screen** — User clicks "Start a writing exam". A "📚 Flashcard Study" link button is displayed beside the start button, opening the Flashcard Study app at `http://localhost:5002` in a new tab.
+1. **Home screen** — `render_welcome()` renders the unified home: a hero plus three equal "door" cards — **Writing Expression**, **Reading Comprehension**, and **Flashcards**. A shared top nav bar (`tools/streamlit_design.py:_render_top_nav()`) appears on every screen with the same destinations. Clicking the Writing Expression door (or the nav "Writing" link) loads `/?goto=writing`, which `_resolve_initial_stage()` resolves into the Setup stage; the Reading Comprehension door opens the RC page; the Flashcards door opens the Flashcard Study app at `http://localhost:5002` in a new tab. The logo links to `/?goto=home`, returning here from any stage. (Streamlit's default sidebar page list is hidden so the top nav is the single navigation surface.)
 2. **Setup** — User selects number of questions (2–20); optionally expands "AI model settings" to override the model/endpoint/key for any tool independently. Displays question bank stats (including warned count) and a "Pre-fill bank" button.
 3. **Cache check** — `assemble_exam_from_cache()` checks the question bank:
    - Sufficient cache → assembles exam instantly, skips generation and review

@@ -337,3 +337,24 @@ body {
   .stats-row { grid-template-columns: repeat(2,1fr); }
   .progress-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Shared cross-app top nav ───────────────────────────────────────────── */
+.sle-topnav {
+  display: flex; align-items: center; gap: 22px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px 20px; margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(37,99,235,0.06);
+}
+.sle-topnav .sle-brand {
+  font-weight: 800; font-size: 15px; color: var(--ink);
+  text-decoration: none; margin-right: auto; letter-spacing: -0.02em;
+}
+.sle-topnav .sle-nav-link {
+  font-weight: 600; font-size: 14px; color: var(--ink-muted);
+  text-decoration: none; padding: 6px 2px;
+  border-bottom: 2px solid transparent; transition: color .15s;
+}
+.sle-topnav .sle-nav-link:hover { color: var(--primary); }
+.sle-topnav .sle-nav-link.active {
+  color: var(--primary); border-bottom-color: var(--primary);
+}
