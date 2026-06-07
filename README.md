@@ -11,6 +11,7 @@ Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compa
   - Error identification — passages with bolded segments, identify which contains errors
 - **Canadian federal workplace contexts** — emails, memos, policies, meeting invitations
 - **Bilingual interface** (English + French)
+- **Unified home & shared navigation** — a single landing page presents all three tools (Writing Expression, Reading Comprehension, Flashcards) as equal entry points, and a shared top nav bar on every screen lets you switch between them in one click
 - **Configurable exam length** — 2 to 20 questions
 - **Randomized answer positions** — correct answers are shuffled across A/B/C/D to prevent guessing patterns
 - **Configurable AI model** — use any OpenAI-compatible endpoint (DeepSeek, OpenAI, Gemini, Ollama...) independently for generation and review — via `.env` or the in-app settings expander
@@ -55,6 +56,9 @@ french_sle_simulator/
 │   │   └── lexique-backup-*.json    # Seed vocabulary (loaded on first run)
 │   ├── src/                         # React 18 + Vite 5 SPA source
 │   │   ├── main.jsx                 # Entry point + HashRouter + layout
+│   │   ├── App.jsx                  # Root layout: left sidebar + shared cross-app top nav
+│   │   ├── components/
+│   │   │   └── TopNav.jsx           # Shared cross-app top nav (links to Writing/Reading on :8501)
 │   │   └── views/
 │   │       ├── Dashboard.jsx        # Deck grid + create/delete decks
 │   │       ├── DeckView.jsx         # Card table + add/edit/delete cards within a deck
@@ -76,7 +80,9 @@ french_sle_simulator/
 │   ├── test_question_bank.py        # Tests for question_bank.py (17 tests)
 │   ├── test_grader_db.py            # Tests for grader_db.py (19 tests)
 │   ├── test_grader_api.py           # Integration tests for grader Flask API (11 tests)
-│   └── test_grader_batch.py         # Unit + integration tests for batch export/import (28 tests)
+│   ├── test_grader_batch.py         # Unit + integration tests for batch export/import (28 tests)
+│   ├── test_top_nav.py              # Tests for shared top nav _render_top_nav() (7 tests)
+│   └── test_app_nav.py              # Tests for ?goto stage routing _resolve_initial_stage() (6 tests)
 ├── workflows/
 │   ├── sle_exam_simulator.md        # SOP for the exam simulator workflow
 │   └── llm_grader.md               # SOP for the LLM Grader expert review workflow
@@ -196,7 +202,7 @@ python grader/app.py --port 5003        # override via CLI flag
 - **Database:** SQLite (question bank + reviews + flashcard decks/sessions)
 - **Framework:** WAT (Workflows, Agents, Tools)
 - **Language:** Python 3.10+, Node.js 18+ (build only; Vite output committed)
-- **Tests:** pytest (89 tests across 7 test modules)
+- **Tests:** pytest (231 tests)
 
 ## Disclaimer
 
