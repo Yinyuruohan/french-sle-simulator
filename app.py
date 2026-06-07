@@ -1030,8 +1030,8 @@ def render_results():
 _resolved = _resolve_initial_stage(st.session_state.stage, st.query_params)
 if _resolved != st.session_state.stage:
     st.session_state.stage = _resolved
-    if "goto" in st.query_params:
-        del st.query_params["goto"]
+    del st.query_params["goto"]
+    st.rerun()
 stage = st.session_state.stage
 
 if stage == "welcome":
