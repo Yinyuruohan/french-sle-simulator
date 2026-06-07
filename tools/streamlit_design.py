@@ -427,7 +427,7 @@ def _render_top_nav(active: str = "home") -> str:
       <a class="sle-brand" href="/" target="_self">🇨🇦 SLE Prep</a>
       <a class="{cls('writing')}" href="/?goto=writing" target="_self">Writing</a>
       <a class="{cls('reading')}" href="/Reading_Comprehension" target="_self">Reading</a>
-      <a class="sle-nav-link" href="{FLASHCARD_URL}" target="_blank">Flashcards</a>
+      <a class="sle-nav-link" href="{FLASHCARD_URL}" target="_blank" rel="noopener noreferrer">Flashcards</a>
     </div>
     """
 

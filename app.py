@@ -518,7 +518,7 @@ def render_welcome():
           <p>Timed passages modeled on the official exam.</p>
           <span class="lp-door-cta">Start →</span>
         </a>
-        <a class="lp-door" href="http://localhost:5002" target="_blank">
+        <a class="lp-door" href="http://localhost:5002" target="_blank" rel="noopener noreferrer">
           <div class="lp-door-ic" style="background:#fefce8;">📚</div>
           <h3>Flashcards</h3>
           <p>Build vocabulary with spaced repetition.</p>
