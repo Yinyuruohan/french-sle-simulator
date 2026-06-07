@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.generate_reading_exam import generate_reading_exam
 from tools.grade_reading_exam import grade_reading_exam
 from tools.model_config import load_default_configs
-from tools.streamlit_design import inject_design_system, _timer_html
+from tools.streamlit_design import inject_design_system, _timer_html, _render_vocab_note_sidebar
 from tools.reading_question_bank import (
     init_db as rc_init_db,
     cache_contexts as rc_cache_contexts,
@@ -88,6 +88,8 @@ def _render_taking():
     if st.button(submit_label, type="primary"):
         _go_to("evaluating")
         st.rerun()
+
+    _render_vocab_note_sidebar(source='rc')
 
 
 def _render_evaluating():
@@ -171,6 +173,8 @@ def _render_results():
             st.session_state.pop(k, None)
         _go_to("welcome")
         st.rerun()
+
+    _render_vocab_note_sidebar(source='rc')
 
 
 def _init_state():

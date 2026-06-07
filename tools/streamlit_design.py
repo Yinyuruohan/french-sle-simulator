@@ -5,6 +5,8 @@ CSS injector without running `app.py`'s module-level Streamlit router.
 """
 import streamlit as st
 
+from tools.flashcard_db import add_to_inbox
+
 
 def inject_design_system() -> None:
     """Inject global design system CSS matching the landing page aesthetic."""
@@ -382,3 +384,22 @@ def _timer_html(total_seconds: int, start_ts: float) -> str:
   }}
 }})();
 </script>"""
+
+
+def _render_vocab_note_sidebar(source: str = 'exam') -> None:
+    with st.sidebar:
+        st.markdown("### 📝 Vocab Note")
+        note_words = st.text_area(
+            "Words you don't know (one per line)",
+            placeholder="atelier\nallouer\naperçu",
+            key="vocab_note_input",
+            height=160,
+            label_visibility="collapsed"
+        )
+        if st.button("Save to Flashcard Inbox", type="secondary", use_container_width=True):
+            words = [w.strip() for w in note_words.splitlines() if w.strip()]
+            if words:
+                add_to_inbox(words, source=source)
+                st.success(f"Saved {len(words)} word(s) to your Flashcard Inbox")
+            else:
+                st.warning("No words to save — enter one word per line")
