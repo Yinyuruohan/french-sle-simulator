@@ -17,7 +17,7 @@ from tools.evaluate_exam import evaluate_exam
 from tools.review_exam import review_exam_quality, log_system_errors
 from tools.model_config import ModelConfig, load_default_configs, MODEL_BASE_URLS, get_provider_default_key
 from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, update_last_incorrect, assemble_exam_from_cache, get_bank_stats, prefill_bank, flag_context
-from tools.streamlit_design import inject_design_system, _render_vocab_note_sidebar
+from tools.streamlit_design import inject_design_system, _render_vocab_note_sidebar, _render_top_nav
 
 st.set_page_config(
     page_title="SLE Written Expression Simulator",
@@ -1033,6 +1033,7 @@ if _resolved != st.session_state.stage:
     del st.query_params["goto"]
     st.rerun()
 stage = st.session_state.stage
+st.html(_render_top_nav("home" if stage == "welcome" else "writing"))
 
 if stage == "welcome":
     render_welcome()

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.generate_reading_exam import generate_reading_exam
 from tools.grade_reading_exam import grade_reading_exam
 from tools.model_config import load_default_configs
-from tools.streamlit_design import inject_design_system, _timer_html, _render_vocab_note_sidebar
+from tools.streamlit_design import inject_design_system, _timer_html, _render_vocab_note_sidebar, _render_top_nav
 from tools.reading_question_bank import (
     init_db as rc_init_db,
     cache_contexts as rc_cache_contexts,
@@ -36,6 +36,7 @@ st.set_page_config(
     layout="wide",
 )
 inject_design_system()
+st.html(_render_top_nav("reading"))
 rc_init_db()
 
 
