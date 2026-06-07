@@ -177,8 +177,9 @@ def assemble_exam_from_cache(num_questions: int) -> dict:
             "FROM rc_contexts "
             "ORDER BY "
             "  CASE WHEN user_flags >= 1 THEN 1 ELSE 0 END, "
+            "  times_served ASC, "
             "  CASE status WHEN 'battle_tested' THEN 0 WHEN 'reviewed' THEN 1 WHEN 'warned' THEN 2 END, "
-            "  times_served ASC, RANDOM()"
+            "  RANDOM()"
         ).fetchall()
 
         selected = _select_contexts_evenly(rows, num_questions)
