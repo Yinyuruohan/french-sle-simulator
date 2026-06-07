@@ -17,8 +17,7 @@ from tools.evaluate_exam import evaluate_exam
 from tools.review_exam import review_exam_quality, log_system_errors
 from tools.model_config import ModelConfig, load_default_configs, MODEL_BASE_URLS, get_provider_default_key
 from tools.question_bank import init_db, cache_contexts, upgrade_to_battle_tested, update_last_incorrect, assemble_exam_from_cache, get_bank_stats, prefill_bank, flag_context
-from tools.flashcard_db import add_to_inbox
-from tools.streamlit_design import inject_design_system
+from tools.streamlit_design import inject_design_system, _render_vocab_note_sidebar
 
 st.set_page_config(
     page_title="SLE Written Expression Simulator",
@@ -726,27 +725,6 @@ def render_setup():
             st.rerun()
         except Exception as e:
             st.error(f"Error generating exam: {e}")
-
-
-# ── Shared sidebar helpers ────────────────────────────────────────────────────
-
-def _render_vocab_note_sidebar():
-    with st.sidebar:
-        st.markdown("### 📝 Vocab Note")
-        note_words = st.text_area(
-            "Words you don't know (one per line)",
-            placeholder="atelier\nallouer\naperçu",
-            key="vocab_note_input",
-            height=160,
-            label_visibility="collapsed"
-        )
-        if st.button("Save to Flashcard Inbox", type="secondary", use_container_width=True):
-            words = [w.strip() for w in note_words.splitlines() if w.strip()]
-            if words:
-                add_to_inbox(words, source='exam')
-                st.success(f"Saved {len(words)} word(s) to your Flashcard Inbox")
-            else:
-                st.warning("No words to save — enter one word per line")
 
 
 # ── Exam ─────────────────────────────────────────────────────────────────────
