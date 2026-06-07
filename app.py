@@ -442,79 +442,88 @@ def render_welcome():
       .lp-hero-left  { animation: lp-up 0.55s cubic-bezier(.22,1,.36,1) both; animation-delay: 0.05s; }
       .lp-mock       { animation: lp-up 0.55s cubic-bezier(.22,1,.36,1) both; animation-delay: 0.18s; }
       .lp-features   { animation: lp-up 0.55s cubic-bezier(.22,1,.36,1) both; animation-delay: 0.28s; }
+
+      .lp-doors {
+        display: flex;
+        gap: 14px;
+        padding: 24px 40px 8px;
+      }
+      .lp-door {
+        flex: 1;
+        display: block;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 22px 20px;
+        text-decoration: none;
+        box-shadow: 0 2px 8px rgba(37,99,235,0.06);
+        transition: transform .15s, box-shadow .15s, border-color .15s;
+      }
+      .lp-door:hover {
+        transform: translateY(-3px);
+        border-color: #93c5fd;
+        box-shadow: 0 8px 24px rgba(37,99,235,0.14);
+      }
+      .lp-door-ic {
+        width: 48px; height: 48px;
+        border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 24px; margin-bottom: 14px;
+      }
+      .lp-door h3 {
+        font-size: 16px; font-weight: 700; color: #0f172a;
+        margin-bottom: 6px;
+      }
+      .lp-door p {
+        font-size: 13px; color: #64748b; line-height: 1.55;
+        margin-bottom: 14px;
+      }
+      .lp-door-cta {
+        font-size: 13px; font-weight: 600; color: #2563eb;
+      }
     </style>
 
     <div class="lp-wrap">
 
       <!-- HERO -->
-      <div class="lp-hero">
+      <div class="lp-hero" style="grid-template-columns: 1fr;">
         <div class="lp-hero-left">
           <div class="lp-badge">Public Service Commission of Canada</div>
-          <h1>Practice French writing<br><span class="accent">smarter</span>, not harder</h1>
-          <p class="lp-hero-sub">Simulateur d'expression écrite — ÉLS / SLE</p>
+          <h1>Practice French for the SLE,<br><span class="accent">end to end</span></h1>
+          <p class="lp-hero-sub">Simulateur ÉLS / SLE — expression écrite · compréhension de l'écrit · vocabulaire</p>
           <p class="lp-hero-desc">
-            AI-generated practice exams modeled on the official SLE Written Expression format.
-            Get instant grammar feedback and track your progress toward levels A, B, and C.
+            One place to practice writing, reading, and vocabulary for the Public Service
+            Commission's Second Language Evaluation. AI-generated exams with instant feedback.
           </p>
           <div class="lp-pills">
             <span class="lp-pill"><span class="dot"></span>Fill-in-the-blank</span>
             <span class="lp-pill"><span class="dot"></span>Error identification</span>
-            <span class="lp-pill"><span class="dot"></span>2–20 questions</span>
-            <span class="lp-pill"><span class="dot"></span>Instant feedback</span>
-            <span class="lp-pill"><span class="dot"></span>Question bank</span>
-          </div>
-        </div>
-
-        <!-- Mock UI -->
-        <div class="lp-mock">
-          <div class="lp-mock-header">
-            <div class="lp-mock-dots">
-              <span></span><span></span><span></span>
-            </div>
-            <span class="lp-mock-title">SLE — Question (3)</span>
-            <span style="font-size:11px;color:rgba(255,255,255,0.6);font-weight:500;">3 / 10</span>
-          </div>
-          <div class="lp-mock-body">
-            <p class="lp-mock-q">Fill in the blank</p>
-            <div class="lp-mock-passage">
-              Le directeur a demandé que tous les employés <span class="blank">(3) ___</span> le rapport avant vendredi.
-            </div>
-            <div class="lp-mock-options">
-              <div class="lp-mock-opt"><span class="opt-letter">A</span> soumettent</div>
-              <div class="lp-mock-opt selected"><span class="opt-letter">B</span> soumettront</div>
-              <div class="lp-mock-opt"><span class="opt-letter">C</span> ont soumis</div>
-              <div class="lp-mock-opt"><span class="opt-letter">D</span> soumettait</div>
-            </div>
-            <div class="lp-mock-level">
-              <div class="lp-level-badge">A ≥50%</div>
-              <div class="lp-level-badge active">B ≥70%</div>
-              <div class="lp-level-badge">C ≥90%</div>
-            </div>
+            <span class="lp-pill"><span class="dot"></span>Timed reading</span>
+            <span class="lp-pill"><span class="dot"></span>Spaced-repetition vocab</span>
           </div>
         </div>
       </div>
 
-      <!-- FEATURES -->
-      <div class="lp-features">
-        <div class="lp-feat-label">Core Features</div>
-        <p class="lp-feat-heading">Here are the <span class="accent">reasons</span> you should try</p>
-        <div class="lp-feat-grid">
-          <div class="lp-feat-card">
-            <div class="lp-feat-icon" style="background:#eff6ff;">🎯</div>
-            <h3>Realistic exam format</h3>
-            <p>Two question types matching the official SLE exam: fill-in-the-blank and error identification with Canadian federal workplace passages.</p>
-          </div>
-          <div class="lp-feat-card">
-            <div class="lp-feat-icon" style="background:#f0fdf4;">✅</div>
-            <h3>Grammar practice &amp; checking</h3>
-            <p>Every question includes a <em>why_correct</em> explanation and grammar rule. AI quality review validates all answers before you see them.</p>
-          </div>
-          <div class="lp-feat-card">
-            <div class="lp-feat-icon" style="background:#fefce8;">⚡</div>
-            <h3>Instant exams, anytime</h3>
-            <p>Question bank cache delivers exams instantly with no API call. Pre-fill the bank once and practice offline at any time.</p>
-          </div>
-        </div>
+      <!-- DOORS -->
+      <div class="lp-doors">
+        <a class="lp-door" href="/?goto=writing" target="_self">
+          <div class="lp-door-ic" style="background:#eff6ff;">📝</div>
+          <h3>Writing Expression</h3>
+          <p>AI-generated exams with instant grammar feedback.</p>
+          <span class="lp-door-cta">Start →</span>
+        </a>
+        <a class="lp-door" href="/Reading_Comprehension" target="_self">
+          <div class="lp-door-ic" style="background:#f0fdf4;">📖</div>
+          <h3>Reading Comprehension</h3>
+          <p>Timed passages modeled on the official exam.</p>
+          <span class="lp-door-cta">Start →</span>
+        </a>
+        <a class="lp-door" href="http://localhost:5002" target="_blank">
+          <div class="lp-door-ic" style="background:#fefce8;">📚</div>
+          <h3>Flashcards</h3>
+          <p>Build vocabulary with spaced repetition.</p>
+          <span class="lp-door-cta">Open →</span>
+        </a>
       </div>
 
       <!-- DISCLAIMER -->
@@ -525,21 +534,6 @@ def render_welcome():
 
     </div>
     """)
-
-    st.markdown("")
-
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        if st.button("Start a writing exam / Commencer un examen d'écriture", type="primary", use_container_width=True):
-            go_to("setup")
-            st.rerun()
-    with col2:
-        st.link_button(
-            "📚 Flashcard Study",
-            "http://localhost:5002",
-            help="Open the Lexique vocabulary flashcard app",
-            use_container_width=True,
-        )
 
 
 # ── Setup ────────────────────────────────────────────────────────────────────
