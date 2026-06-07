@@ -19,3 +19,11 @@ def test_goto_does_not_override_midflow():
 
 def test_unknown_goto_value_ignored():
     assert _resolve_initial_stage("welcome", {"goto": "nope"}) == "welcome"
+
+
+def test_goto_home_from_midflow_returns_welcome():
+    assert _resolve_initial_stage("exam", {"goto": "home"}) == "welcome"
+
+
+def test_goto_home_from_results_returns_welcome():
+    assert _resolve_initial_stage("results", {"goto": "home"}) == "welcome"

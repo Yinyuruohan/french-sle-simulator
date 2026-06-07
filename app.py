@@ -51,10 +51,16 @@ def go_to(stage):
 
 
 def _resolve_initial_stage(current_stage, query_params):
-    """Jump into the writing setup stage when the user arrives via the
-    top-nav Writing link (?goto=writing) from the welcome page. Mid-flow
-    stages are never overridden."""
-    if current_stage == "welcome" and query_params.get("goto") == "writing":
+    """Resolve the stage to render based on top-nav navigation intent.
+
+    `?goto=home` always returns to the welcome page (so the logo works from
+    any stage). `?goto=writing` enters the writing setup stage from the
+    welcome page. Otherwise the current stage is kept (mid-flow stages are
+    never overridden by a stray param)."""
+    goto = query_params.get("goto")
+    if goto == "home":
+        return "welcome"
+    if current_stage == "welcome" and goto == "writing":
         return "setup"
     return current_stage
 
@@ -1022,9 +1028,10 @@ def render_results():
 # ── Router ───────────────────────────────────────────────────────────────────
 
 _resolved = _resolve_initial_stage(st.session_state.stage, st.query_params)
-if _resolved != st.session_state.stage:
-    st.session_state.stage = _resolved
+if "goto" in st.query_params:
     del st.query_params["goto"]
+    if _resolved != st.session_state.stage:
+        st.session_state.stage = _resolved
     st.rerun()
 stage = st.session_state.stage
 st.html(_render_top_nav("home" if stage == "welcome" else "writing"))
