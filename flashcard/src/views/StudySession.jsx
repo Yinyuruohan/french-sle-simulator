@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getCards, updateMastery, saveSessions } from '../api.js';
+import SpeakerButton from '../components/SpeakerButton.jsx';
+import { isSupported, speak, stop } from '../lib/speech.js';
 
 function shuffle(arr) {
   const a = [...arr];
@@ -20,7 +22,7 @@ function FlipCard({ card, onAnswer }) {
   const [flipped, setFlipped] = useState(false);
   return (
     <div className="study-card">
-      <div className="study-front">{card.front}</div>
+      <div className="study-front">{card.front} <SpeakerButton text={card.front} /></div>
       <div className="study-type">{card.type}</div>
       {!flipped ? (
         <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={() => setFlipped(true)}>
@@ -62,7 +64,7 @@ function MCQCard({ card, allCards, onAnswer }) {
       <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink-muted)', marginBottom: 10 }}>
         Choose the translation
       </div>
-      <div className="study-front">{card.front}</div>
+      <div className="study-front">{card.front} <SpeakerButton text={card.front} /></div>
       <div className="study-type" style={{ marginBottom: 24 }}>{card.type}</div>
       {choices.map((c, i) => {
         let cls = 'mcq-choice';
@@ -98,7 +100,7 @@ function TypeCard({ card, onAnswer }) {
       <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink-muted)', marginBottom: 10 }}>
         Type the English translation
       </div>
-      <div className="study-front">{card.front}</div>
+      <div className="study-front">{card.front} <SpeakerButton text={card.front} /></div>
       <div className="study-type" style={{ marginBottom: 20 }}>{card.type}</div>
       <div style={{ display: 'flex', gap: 10 }}>
         <input
@@ -153,8 +155,30 @@ export default function StudySession() {
   const [done, setDone] = useState(false);
   const correctRef = useRef(0);
   const incorrectRef = useRef(0);
+  const [autoPlay, setAutoPlay] = useState(() => localStorage.getItem('flashcard-autoplay') === '1');
+
+  function toggleAutoPlay() {
+    setAutoPlay(prev => {
+      const next = !prev;
+      localStorage.setItem('flashcard-autoplay', next ? '1' : '0');
+      if (!next) stop();
+      return next;
+    });
+  }
 
   useEffect(() => { getCards(id).then(setCards).catch(() => {}); }, [id]);
+
+  // Auto-play: pronounce the new card's word whenever the card changes.
+  useEffect(() => {
+    if (!mode || done || !autoPlay || !queue.length) return;
+    speak(queue[idx].front);
+  }, [mode, idx, done, autoPlay, queue]);
+
+  // Stop any speech when the session ends or the view unmounts.
+  useEffect(() => {
+    if (done) stop();
+  }, [done]);
+  useEffect(() => () => stop(), []);
 
   function startStudy(m) {
     const q = shuffle(cards);
@@ -238,7 +262,12 @@ export default function StudySession() {
       <div className="topbar">
         <span className="topbar-title">{progress}</span>
         <div className="topbar-actions">
-          <button className="btn" onClick={() => setMode(null)}>✕ End session</button>
+          {isSupported() && (
+            <button className="btn" onClick={toggleAutoPlay} title="Lecture automatique du mot">
+              {autoPlay ? '🔊 Auto-play on' : '🔇 Auto-play off'}
+            </button>
+          )}
+          <button className="btn" onClick={() => { stop(); setMode(null); }}>✕ End session</button>
         </div>
       </div>
       <div className="view">
