@@ -38,6 +38,7 @@ Built on the **WAT framework** (Workflows, Agents, Tools) using any OpenAI-compa
   - Three study modes: flip cards, multiple-choice (MCQ), and type-in
   - Mastery tracking with progress bars and per-session history
   - React 18 + Vite SPA served by Flask; same design language as the exam simulator
+  - Voice pronunciation: speaker buttons in the card table and all three study modes read French words aloud via the browser Web Speech API (fr-CA > fr-FR voice preference, no API cost); auto-play toggle in the study session topbar persists across sessions
 
 ## Project Structure
 

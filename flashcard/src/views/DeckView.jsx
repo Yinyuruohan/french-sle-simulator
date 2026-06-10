@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getDecks, getCards, addCard, updateCard, deleteCard, aiFromTopic, aiFromText, aiCommit } from '../api.js';
 import Modal from '../components/Modal.jsx';
 import { useToast } from '../components/Toast.jsx';
+import SpeakerButton from '../components/SpeakerButton.jsx';
 
 const EMPTY_FORM = { front: '', type: '', en: '', zh: '', example: '' };
 
@@ -139,7 +140,12 @@ export default function DeckView() {
             <tbody>
               {filtered.map(card => (
                 <tr key={card.id}>
-                  <td className="td-fr">{card.front}</td>
+                  <td className="td-fr">
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {card.front}
+                      <SpeakerButton text={card.front} />
+                    </span>
+                  </td>
                   <td className="td-type">{card.type}</td>
                   <td>{card.en}</td>
                   <td>{card.zh}</td>

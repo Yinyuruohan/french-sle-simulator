@@ -7,9 +7,9 @@ This directory contains **Standard Operating Procedures (SOPs)** written in Mark
 | Workflow | Description |
 |---|---|
 | `sle_exam_simulator.md` | Full SOP for the Written Expression pipeline: generation, quality review, exam administration, evaluation, and results display |
+| `reading_comprehension.md` | SOP for the Reading Comprehension pipeline: generation with stem families, rule-based review (no LLM), timed exam administration, deterministic grading, and the RC question bank |
 | `llm_grader.md` | SOP for the expert review interface: Flask startup, list/detail navigation, review submission, snapshot staleness detection, and batch Excel export/import |
-
-> **Reading Comprehension** runs inside the same Streamlit app as Written Expression (reachable from the shared top nav) but has no separate SOP in this directory yet. It is implemented by `tools/generate_reading_exam.py`, `tools/grade_reading_exam.py`, `tools/reading_question_bank.py`, and `tools/review_reading_exam.py`.
+| `flashcard_study.md` | SOP for the Flashcard Study app: decks and cards, three study modes with voice pronunciation (TTS), mastery tracking, AI card generation, and the cross-app vocab inbox |
 
 ## What is a Workflow?
 
