@@ -158,17 +158,16 @@ export default function StudySession() {
   const [autoPlay, setAutoPlay] = useState(() => localStorage.getItem('flashcard-autoplay') === '1');
 
   function toggleAutoPlay() {
-    setAutoPlay(prev => {
-      const next = !prev;
-      localStorage.setItem('flashcard-autoplay', next ? '1' : '0');
-      if (!next) stop();
-      return next;
-    });
+    const next = !autoPlay;
+    localStorage.setItem('flashcard-autoplay', next ? '1' : '0');
+    if (!next) stop();
+    setAutoPlay(next);
   }
 
   useEffect(() => { getCards(id).then(setCards).catch(() => {}); }, [id]);
 
   // Auto-play: pronounce the new card's word whenever the card changes.
+  // autoPlay in deps is intentional: toggling ON mid-card speaks the current word.
   useEffect(() => {
     if (!mode || done || !autoPlay || !queue.length) return;
     speak(queue[idx].front);
