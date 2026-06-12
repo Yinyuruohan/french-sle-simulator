@@ -72,7 +72,7 @@ tools/
   llm_evaluator.py        # LLM judge: evaluate_context() rates a context Good/Bad with critique
   streamlit_design.py     # Shared Streamlit CSS (inject_design_system()) + RC timer (_timer_html()) + vocab note sidebar (_render_vocab_note_sidebar()) + shared top nav (_render_top_nav())
 LLM_judge_prompt.md       # System prompt for the LLM evaluator judge (SLE criteria + output format)
-tests/                    # pytest suite — 243 tests across 18 modules
+tests/                    # pytest suite — 244 tests across 18 modules
   test_model_config.py    # Unit tests for model_config.py (8 tests)
   test_generate_exam.py   # ModelConfig wiring tests for generate_exam.py (6 tests)
   test_evaluate_exam.py   # Unit tests for evaluate_exam.py (4 tests)
@@ -80,7 +80,7 @@ tests/                    # pytest suite — 243 tests across 18 modules
   test_question_bank.py   # Unit tests for question_bank.py (28 tests)
   test_generate_reading_exam.py  # Unit tests for generate_reading_exam.py (19 tests)
   test_grade_reading_exam.py     # Unit tests for grade_reading_exam.py (11 tests)
-  test_reading_question_bank.py  # Unit tests for reading_question_bank.py (31 tests)
+  test_reading_question_bank.py  # Unit tests for reading_question_bank.py (32 tests)
   test_review_reading_exam.py    # Unit tests for review_reading_exam.py (15 tests)
   test_rc_timer.py        # Unit tests for _timer_html() (7 tests)
   test_llm_evaluator.py   # Unit tests for llm_evaluator.py (4 tests)

@@ -171,6 +171,15 @@ def test_assemble_returns_exam_dict_with_renumbered_ids():
     assert qids == [1, 2]
 
 
+def test_assemble_propagates_topic():
+    """Cached exams carry the same topic field fresh exams are required to have."""
+    from tools.reading_question_bank import init_db, cache_contexts, assemble_exam_from_cache
+    init_db()
+    cache_contexts(_exam([_ctx(1, "P sujet.", topic="Le recyclage municipal")]))
+    result = assemble_exam_from_cache(1)
+    assert result["exam"]["contexts"][0]["topic"] == "Le recyclage municipal"
+
+
 def test_assemble_propagates_bank_context_id_and_passage_hash():
     from tools.reading_question_bank import init_db, cache_contexts, assemble_exam_from_cache
     init_db()

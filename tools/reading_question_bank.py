@@ -37,10 +37,16 @@ def init_db():
             cols = {r[1] for r in conn.execute("PRAGMA table_info(rc_contexts)").fetchall()}
             if "user_flags" not in cols:
                 conn.execute("DROP TABLE rc_contexts")
-                conn.commit()
-            elif "topic" not in cols:
-                conn.execute("ALTER TABLE rc_contexts ADD COLUMN topic TEXT NOT NULL DEFAULT ''")
-                conn.commit()
+            else:
+                # Columns added after the original schema: ALTER in place so
+                # existing cached passages survive the upgrade.
+                added_columns = {
+                    "topic": "ALTER TABLE rc_contexts ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
+                }
+                for col, ddl in added_columns.items():
+                    if col not in cols:
+                        conn.execute(ddl)
+            conn.commit()
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS rc_contexts (
@@ -157,18 +163,14 @@ def get_recent_topics(limit: int = 20) -> list[str]:
     try:
         rows = conn.execute(
             "SELECT topic FROM rc_contexts WHERE topic != '' "
-            "ORDER BY created_at DESC, rowid DESC"
+            "GROUP BY topic "
+            "ORDER BY MAX(created_at) DESC, MAX(rowid) DESC "
+            "LIMIT ?",
+            (limit,),
         ).fetchall()
     finally:
         conn.close()
-
-    topics: list[str] = []
-    for row in rows:
-        if row["topic"] not in topics:
-            topics.append(row["topic"])
-        if len(topics) >= limit:
-            break
-    return topics
+    return [row["topic"] for row in rows]
 
 
 def lookup_context_ids_by_hashes(passage_hashes: list[str]) -> dict[str, str]:
@@ -204,7 +206,7 @@ def assemble_exam_from_cache(num_questions: int) -> dict:
 
         rows = conn.execute(
             "SELECT context_id, passage, has_signature, question_json, "
-            "stem_family, status, user_flags, passage_hash "
+            "stem_family, status, user_flags, passage_hash, topic "
             "FROM rc_contexts "
             "ORDER BY "
             "  times_served ASC, "
@@ -251,6 +253,7 @@ def _build_exam_from_rows(rows: list) -> dict:
         contexts.append({
             "context_id": idx,
             "passage": row["passage"],
+            "topic": row["topic"],
             "has_signature": bool(row["has_signature"]),
             "questions": [question],
             "bank_context_id": row["context_id"],
