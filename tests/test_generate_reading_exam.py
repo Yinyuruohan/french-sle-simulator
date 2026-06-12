@@ -12,6 +12,7 @@ def _valid_exam_json(num=2):
         contexts.append({
             "context_id": i + 1,
             "passage": f"Passage {i+1}.",
+            "topic": f"Sujet distinct {i+1}",
             "has_signature": False,
             "questions": [{
                 "question_id": i + 1,
@@ -159,6 +160,65 @@ def test_generate_reading_exam_raises_on_wrong_count():
         from tools.generate_reading_exam import generate_reading_exam
         with pytest.raises(ValueError, match="question count"):
             generate_reading_exam(5, model_config=cfg)
+
+
+def test_validate_rejects_missing_topic():
+    from tools.generate_reading_exam import _validate_exam_schema
+    exam = json.loads(_valid_exam_json(num=1))
+    del exam["contexts"][0]["topic"]
+    with pytest.raises(ValueError, match="topic"):
+        _validate_exam_schema(exam, expected_n=1)
+
+
+def test_validate_rejects_empty_topic():
+    from tools.generate_reading_exam import _validate_exam_schema
+    exam = json.loads(_valid_exam_json(num=1))
+    exam["contexts"][0]["topic"] = "   "
+    with pytest.raises(ValueError, match="topic"):
+        _validate_exam_schema(exam, expected_n=1)
+
+
+def test_generate_reading_exam_passes_avoid_topics_in_user_prompt():
+    """avoid_topics are injected into the user prompt as an exclusion list."""
+    cfg = ModelConfig(api_key="k", base_url="https://x", model="m")
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = _valid_exam_json(num=2)
+    mock_client.chat.completions.create.return_value = mock_response
+
+    with patch("tools.generate_reading_exam.OpenAI", return_value=mock_client):
+        from tools.generate_reading_exam import generate_reading_exam
+        generate_reading_exam(2, model_config=cfg,
+                              avoid_topics=["recyclage municipal", "télétravail"])
+
+    messages = mock_client.chat.completions.create.call_args.kwargs["messages"]
+    user_msg = next(m for m in messages if m["role"] == "user")["content"]
+    assert "recyclage municipal" in user_msg
+    assert "télétravail" in user_msg
+
+
+def test_generate_reading_exam_omits_avoid_clause_without_topics():
+    cfg = ModelConfig(api_key="k", base_url="https://x", model="m")
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = _valid_exam_json(num=2)
+    mock_client.chat.completions.create.return_value = mock_response
+
+    with patch("tools.generate_reading_exam.OpenAI", return_value=mock_client):
+        from tools.generate_reading_exam import generate_reading_exam
+        generate_reading_exam(2, model_config=cfg)
+
+    messages = mock_client.chat.completions.create.call_args.kwargs["messages"]
+    user_msg = next(m for m in messages if m["role"] == "user")["content"]
+    assert "recently used topics" not in user_msg
+
+
+def test_prompt_requires_distinct_topics():
+    """The system prompt must state the hard topic-diversity rule and the topic field."""
+    from tools.generate_reading_exam import SYSTEM_PROMPT
+    text = SYSTEM_PROMPT.lower()
+    assert '"topic"' in text
+    assert "distinct" in text
 
 
 def test_generate_reading_exam_prompt_mentions_stem_families_and_distractors():

@@ -22,6 +22,7 @@ from tools.reading_question_bank import (
     get_bank_stats as rc_get_bank_stats,
     assemble_exam_from_cache as rc_assemble_from_cache,
     prefill_bank as rc_prefill_bank,
+    get_recent_topics as rc_get_recent_topics,
     upgrade_to_battle_tested as rc_upgrade_to_battle_tested,
     update_last_incorrect as rc_update_last_incorrect,
     flag_context as rc_flag_context,
@@ -300,7 +301,8 @@ def _render_generating():
         with st.spinner(f"Generating {n}-question Reading Comprehension exam…"):
             try:
                 fresh = generate_reading_exam(n,
-                                              model_config=st.session_state.rc_model_config)
+                                              model_config=st.session_state.rc_model_config,
+                                              avoid_topics=rc_get_recent_topics())
             except Exception as e:
                 st.error(f"Generation failed: {e}")
                 if st.button("Retry"):

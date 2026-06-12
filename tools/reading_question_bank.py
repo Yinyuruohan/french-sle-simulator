@@ -38,6 +38,9 @@ def init_db():
             if "user_flags" not in cols:
                 conn.execute("DROP TABLE rc_contexts")
                 conn.commit()
+            elif "topic" not in cols:
+                conn.execute("ALTER TABLE rc_contexts ADD COLUMN topic TEXT NOT NULL DEFAULT ''")
+                conn.commit()
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS rc_contexts (
@@ -52,7 +55,8 @@ def init_db():
                 times_served INTEGER NOT NULL DEFAULT 0,
                 passage_hash TEXT NOT NULL UNIQUE,
                 last_incorrect INTEGER NOT NULL DEFAULT 0,
-                user_flags INTEGER NOT NULL DEFAULT 0
+                user_flags INTEGER NOT NULL DEFAULT 0,
+                topic TEXT NOT NULL DEFAULT ''
             )
         """)
         conn.commit()
@@ -94,8 +98,8 @@ def cache_contexts(exam: dict, status: str = "reviewed"):
                 """INSERT INTO rc_contexts
                    (context_id, passage, has_signature, question_json,
                     stem_family, status, source_session, created_at,
-                    times_served, passage_hash)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)""",
+                    times_served, passage_hash, topic)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
                 (
                     str(uuid.uuid4()),
                     ctx["passage"],
@@ -106,6 +110,7 @@ def cache_contexts(exam: dict, status: str = "reviewed"):
                     session_id,
                     now,
                     p_hash,
+                    ctx.get("topic") or "",
                 ),
             )
         conn.commit()
@@ -140,6 +145,30 @@ def get_bank_stats() -> dict:
             stats[status] = count
             stats[f"{status}_questions"] = count
     return stats
+
+
+def get_recent_topics(limit: int = 20) -> list[str]:
+    """Return up to `limit` distinct non-empty topics, most recently cached first.
+
+    Used as the avoid-list for generate_reading_exam so fresh exams steer away
+    from subjects already in the bank.
+    """
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT topic FROM rc_contexts WHERE topic != '' "
+            "ORDER BY created_at DESC, rowid DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    topics: list[str] = []
+    for row in rows:
+        if row["topic"] not in topics:
+            topics.append(row["topic"])
+        if len(topics) >= limit:
+            break
+    return topics
 
 
 def lookup_context_ids_by_hashes(passage_hashes: list[str]) -> dict[str, str]:
@@ -352,9 +381,10 @@ def update_last_incorrect(evaluation: dict):
 
 
 # Module-level wrappers so tests can monkeypatch without touching real APIs.
-def _generate_reading_exam(num_questions: int, model_config):
+def _generate_reading_exam(num_questions: int, model_config, avoid_topics=None):
     from tools.generate_reading_exam import generate_reading_exam
-    return generate_reading_exam(num_questions, model_config=model_config)
+    return generate_reading_exam(num_questions, model_config=model_config,
+                                 avoid_topics=avoid_topics)
 
 
 def _review_reading_exam(exam: dict):
@@ -365,7 +395,8 @@ def _review_reading_exam(exam: dict):
 def prefill_bank(num_questions: int, model_config) -> dict:
     """Generate + rule-based review + cache. Returns {success, message}."""
     from tools.review_reading_exam import EXAM_LEVEL_WARNING_CATEGORIES
-    exam = _generate_reading_exam(num_questions, model_config=model_config)
+    exam = _generate_reading_exam(num_questions, model_config=model_config,
+                                  avoid_topics=get_recent_topics())
     review = _review_reading_exam(exam)
 
     critical_ctx_ids = set()

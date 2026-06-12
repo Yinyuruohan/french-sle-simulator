@@ -26,10 +26,11 @@ def _q(stem_family="main_idea", correct="A", bolded_term=None, qid=1):
 
 
 def _ctx(context_id=1, passage="Un passage francophone unique.",
-         has_signature=False, q=None):
+         has_signature=False, q=None, topic=""):
     return {
         "context_id": context_id,
         "passage": passage,
+        "topic": topic,
         "has_signature": has_signature,
         "questions": [q or _q(qid=context_id)],
     }
@@ -59,6 +60,7 @@ def test_init_db_creates_rc_contexts_table():
             "context_id", "passage", "has_signature", "question_json",
             "stem_family", "status", "source_session", "created_at",
             "times_served", "passage_hash", "last_incorrect", "user_flags",
+            "topic",
         }
         assert expected.issubset(cols)
     finally:
@@ -385,6 +387,107 @@ def test_flag_context_writes_tracking_file():
     assert "Wrong answer key" in content
 
 
+def test_init_db_migrates_old_schema_adding_topic_preserving_rows():
+    """An existing DB without the topic column gains it without losing rows."""
+    import sqlite3
+    from tools.reading_question_bank import init_db, DB_PATH
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute("""
+            CREATE TABLE rc_contexts (
+                context_id TEXT PRIMARY KEY,
+                passage TEXT NOT NULL,
+                has_signature INTEGER NOT NULL DEFAULT 0,
+                question_json TEXT NOT NULL,
+                stem_family TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'reviewed',
+                source_session TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                times_served INTEGER NOT NULL DEFAULT 0,
+                passage_hash TEXT NOT NULL UNIQUE,
+                last_incorrect INTEGER NOT NULL DEFAULT 0,
+                user_flags INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        conn.execute(
+            "INSERT INTO rc_contexts (context_id, passage, question_json, stem_family, "
+            "source_session, created_at, passage_hash) VALUES ('id1', 'P', '{}', "
+            "'main_idea', 's', '2026-01-01', 'h1')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    init_db()
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(rc_contexts)").fetchall()}
+        assert "topic" in cols
+        count = conn.execute("SELECT COUNT(*) FROM rc_contexts").fetchone()[0]
+        assert count == 1
+    finally:
+        conn.close()
+
+
+def test_cache_contexts_stores_topic():
+    import sqlite3
+    from tools.reading_question_bank import init_db, cache_contexts, DB_PATH
+    init_db()
+    cache_contexts(_exam([_ctx(1, "P topique.", topic="Le recyclage municipal")]))
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        row = conn.execute("SELECT topic FROM rc_contexts").fetchone()
+        assert row[0] == "Le recyclage municipal"
+    finally:
+        conn.close()
+
+
+def test_get_recent_topics_returns_distinct_recent():
+    from tools.reading_question_bank import init_db, cache_contexts, get_recent_topics
+    init_db()
+    cache_contexts(_exam([
+        _ctx(1, "P1", topic="Recyclage"),
+        _ctx(2, "P2", topic="Télétravail"),
+        _ctx(3, "P3", topic="Recyclage"),  # duplicate topic, distinct passage
+    ]))
+    topics = get_recent_topics()
+    assert topics.count("Recyclage") == 1
+    assert set(topics) == {"Recyclage", "Télétravail"}
+
+
+def test_get_recent_topics_skips_empty_and_respects_limit():
+    from tools.reading_question_bank import init_db, cache_contexts, get_recent_topics
+    init_db()
+    cache_contexts(_exam([_ctx(1, "Sans sujet")]))  # topic defaults to ""
+    for i in range(5):
+        cache_contexts(_exam([_ctx(i + 2, f"P{i + 2}", topic=f"Sujet {i + 2}")]))
+    topics = get_recent_topics(limit=3)
+    assert len(topics) == 3
+    assert "" not in topics
+    # most recently cached topics come first
+    assert topics[0] == "Sujet 6"
+
+
+def test_prefill_passes_recent_topics_to_generator(monkeypatch):
+    import tools.reading_question_bank as rqb
+    from tools.reading_question_bank import init_db, cache_contexts, prefill_bank
+    init_db()
+    cache_contexts(_exam([_ctx(1, "Déjà en banque", topic="Recyclage")]))
+
+    captured = {}
+
+    def fake_gen(n, model_config, avoid_topics=None):
+        captured["avoid_topics"] = avoid_topics
+        return _exam([_ctx(2, " ".join(["mot"] * 100), topic="Télétravail")])
+
+    monkeypatch.setattr(rqb, "_generate_reading_exam", fake_gen)
+    monkeypatch.setattr(rqb, "_review_reading_exam",
+                        lambda e: {"flagged_questions": []})
+    prefill_bank(1, model_config=None)
+    assert "Recyclage" in captured["avoid_topics"]
+
+
 def test_prefill_caches_clean_contexts_as_reviewed(monkeypatch):
     """Stub generate+review so no API call happens."""
     import tools.reading_question_bank as rqb
@@ -396,7 +499,7 @@ def test_prefill_caches_clean_contexts_as_reviewed(monkeypatch):
         for i in range(3)
     ])
     monkeypatch.setattr(rqb, "_generate_reading_exam",
-                        lambda n, model_config: clean_exam)
+                        lambda n, model_config, avoid_topics=None: clean_exam)
     monkeypatch.setattr(rqb, "_review_reading_exam",
                         lambda exam: {"flagged_questions": []})
 
@@ -414,7 +517,7 @@ def test_prefill_caches_warned_when_warning_flagged(monkeypatch):
     init_db()
     exam = _exam([_ctx(i + 1, " ".join(["mot"] * 100) + f" v{i}") for i in range(2)])
     monkeypatch.setattr(rqb, "_generate_reading_exam",
-                        lambda n, model_config: exam)
+                        lambda n, model_config, avoid_topics=None: exam)
     monkeypatch.setattr(rqb, "_review_reading_exam",
                         lambda e: {"flagged_questions": [
                             {"context_id": 1, "severity": "warning", "category": "x", "issue": ""},
@@ -432,7 +535,7 @@ def test_prefill_excludes_critical_contexts(monkeypatch):
     init_db()
     exam = _exam([_ctx(i + 1, " ".join(["mot"] * 100) + f" w{i}") for i in range(3)])
     monkeypatch.setattr(rqb, "_generate_reading_exam",
-                        lambda n, model_config: exam)
+                        lambda n, model_config, avoid_topics=None: exam)
     monkeypatch.setattr(rqb, "_review_reading_exam",
                         lambda e: {"flagged_questions": [
                             {"context_id": 2, "severity": "critical", "category": "x", "issue": ""},
@@ -450,7 +553,7 @@ def test_prefill_returns_failure_when_all_critical(monkeypatch):
     init_db()
     exam = _exam([_ctx(i + 1, f"P {i}") for i in range(2)])
     monkeypatch.setattr(rqb, "_generate_reading_exam",
-                        lambda n, model_config: exam)
+                        lambda n, model_config, avoid_topics=None: exam)
     monkeypatch.setattr(rqb, "_review_reading_exam",
                         lambda e: {"flagged_questions": [
                             {"context_id": 1, "severity": "critical", "category": "x", "issue": ""},
@@ -468,7 +571,8 @@ def test_prefill_excludes_context_with_both_critical_and_warning(monkeypatch):
 
     init_db()
     exam = _exam([_ctx(i + 1, " ".join(["mot"] * 100) + f" d{i}") for i in range(2)])
-    monkeypatch.setattr(rqb, "_generate_reading_exam", lambda n, model_config: exam)
+    monkeypatch.setattr(rqb, "_generate_reading_exam",
+                        lambda n, model_config, avoid_topics=None: exam)
     monkeypatch.setattr(rqb, "_review_reading_exam", lambda e: {
         "flagged_questions": [
             {"context_id": 1, "severity": "critical", "category": "x", "issue": ""},
