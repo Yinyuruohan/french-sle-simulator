@@ -53,9 +53,11 @@ def _validate_exam_schema(exam: dict, expected_n: int) -> None:
         questions = ctx.get("questions")
         if not isinstance(questions, list) or len(questions) != 1:
             raise ValueError(f"Context {ctx.get('context_id')} must have exactly one question")
-        for field in ("context_id", "passage"):
+        for field in ("context_id", "passage", "topic"):
             if field not in ctx:
                 raise ValueError(f"Context is missing field '{field}'")
+        if not isinstance(ctx["topic"], str) or not ctx["topic"].strip():
+            raise ValueError(f"Context {ctx.get('context_id')} topic must be a non-empty string")
         q = questions[0]
         for f in _REQUIRED_QUESTION_FIELDS:
             if f not in q:
@@ -104,6 +106,16 @@ EXAM RULES
   *Le ministre des Affaires sociales et de la famille*) only occasionally, at most about 1 passage in 20,
   and only when the genre naturally calls for it. Do NOT force them. Set has_signature=true only for
   such a passage; otherwise has_signature=false.
+
+TOPIC DIVERSITY — HARD RULE
+- Every passage in the exam MUST cover a distinct subject. Never write two passages about the same
+  topic (e.g. two recycling briefs, two training invitations) in one exam — vary subject matter AND
+  genre across the N passages.
+- Label each passage with a "topic" field: a short French noun phrase (2–6 words) naming its subject,
+  e.g. "le recyclage municipal", "une offre d'emploi en informatique". This label is metadata, not
+  part of the passage.
+- If the user lists recently used topics to avoid, do NOT reuse them or close variants — choose
+  clearly different subjects.
 
 STEM-OPTION GRAMMATICAL RELATIONSHIP — CRITICAL
 The most distinctive feature of SLE Reading items is how the stem and its four options relate
@@ -169,6 +181,7 @@ OUTPUT FORMAT — STRICT JSON
     {
       "context_id": 1,
       "passage": "...",
+      "topic": "le recyclage municipal",
       "has_signature": false,
       "questions": [
         {
@@ -190,8 +203,12 @@ question_id numbering is continuous across passages: 1, 2, 3, ... N.
 """
 
 
-def generate_reading_exam(num_questions: int, model_config: ModelConfig = None) -> dict:
+def generate_reading_exam(num_questions: int, model_config: ModelConfig = None,
+                          avoid_topics: list = None) -> dict:
     """Generate an N-question SLE Reading Comprehension exam.
+
+    avoid_topics: recently used topic labels the model must not reuse
+    (typically from reading_question_bank.get_recent_topics()).
 
     Raises ValueError on invalid N, missing API key, malformed JSON, or schema mismatch.
     """
@@ -206,6 +223,11 @@ def generate_reading_exam(num_questions: int, model_config: ModelConfig = None) 
     client = OpenAI(api_key=model_config.api_key, base_url=model_config.base_url)
 
     user_prompt = f"Generate an SLE Reading Comprehension mock exam with N = {num_questions}. Return strict JSON only."
+    if avoid_topics:
+        user_prompt += (
+            "\nDo NOT reuse these recently used topics (or close variants); "
+            "choose clearly different subjects: " + "; ".join(avoid_topics)
+        )
 
     response = client.chat.completions.create(
         model=model_config.model,

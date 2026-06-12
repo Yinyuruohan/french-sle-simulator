@@ -43,7 +43,9 @@ Open `http://localhost:8501` and click the **Reading Comprehension** door on the
    - One passage per question (1:1 context:question, unlike WE's 1–2 per context)
    - Administrative/workplace French, 15–130 words per passage
    - Each question tagged with a `stem_family` (see Prompt Design below)
-   - Schema validation rejects malformed responses before they reach the user (valid stem families, vocabulary questions must carry `bolded_term`, etc.)
+   - Each passage labelled with a short French `topic` (e.g. "le recyclage municipal"); the prompt enforces a hard rule that every passage in an exam covers a distinct subject
+   - **Topic avoid-list:** the fresh path passes `avoid_topics=get_recent_topics()` (up to 20 most recently cached topics) so new exams steer away from subjects already in the bank — this counters the model's tendency to converge on the same few topics across calls
+   - Schema validation rejects malformed responses before they reach the user (valid stem families, vocabulary questions must carry `bolded_term`, non-empty `topic`, etc.)
    - Saves exam markdown to `.tmp/`
 4. **Rule-based review + cache split** — `review_reading_exam()` runs deterministic checks (free, instant; see Rule-Based Review below):
    - Contexts with **critical** findings are excluded from the cache
@@ -67,6 +69,7 @@ Structural contracts enforced by schema validation and/or review:
 - **`vocabulary`** questions must carry a non-null `bolded_term`; the term must appear as `**term**` in the passage and be repeated in the question text. All other families must have `bolded_term = null`.
 - **`sentence_completion`** passages must end with a `____.` blank.
 - **`has_signature`** — passages may carry a memo-style signature block only when the genre naturally calls for it (the prompt forbids forcing them); the flag is stored in the bank.
+- **`topic`** — every passage carries a short French noun-phrase label (2–6 words) naming its subject; must be non-empty (schema validation). The prompt forbids two passages on the same subject within one exam, and the caller can pass `avoid_topics` (recently used topics) to exclude across exams.
 - Passage length 15–130 words (checked at review as a warning).
 
 ## Rule-Based Review (no LLM)
@@ -94,7 +97,7 @@ The lifecycle is the same as WE (`sle_exam_simulator.md` § Unified Quality Revi
 
 - Separate database: `reading_question_bank.db` (gitignored, deletable/rebuildable)
 - Exactly 1 question per context
-- Schema stores `stem_family` (instead of WE's `grammar_topics`) and `has_signature`
+- Schema stores `stem_family` (instead of WE's `grammar_topics`), `has_signature`, and `topic` (the passage's subject label; `get_recent_topics()` reads it to build the avoid-list for fresh generation; older DBs are migrated in place with an empty topic)
 - Assembly ordering: `times_served` ASC first (fresh material always surfaces before repeats — a passage only repeats once the whole bank has been cycled), then a single quality tier (`reviewed` > `battle_tested` > `warned` > user-flagged), then `RANDOM()` tiebreak. No stem-family balancing. The selected contexts are shuffled before numbering, so exam order is random rather than reflecting selection priority.
 
 ## Timer
@@ -132,6 +135,7 @@ The lifecycle is the same as WE (`sle_exam_simulator.md` § Unified Quality Revi
 - The timer is client-side JavaScript. A page refresh restores the correct remaining time (state lives in `rc_timer_start` server-side), but the blocking modal can be bypassed by anyone with dev tools — it's an honor-system simulation, not enforcement.
 - Justifications are generated together with the questions and are not independently reviewed.
 - The 90 s/question budget approximates the official pacing but is not the PSC's actual timing model.
+- Topic diversity is prompt-enforced, not verified: the reviewer has no topic-overlap check, and the avoid-list only knows topics that reached the bank (passages excluded for critical issues leave no trace). Rows cached before the `topic` column existed have an empty topic and never appear in the avoid-list.
 
 ## Future Improvements
 
