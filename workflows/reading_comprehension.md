@@ -95,7 +95,7 @@ The lifecycle is the same as WE (`sle_exam_simulator.md` § Unified Quality Revi
 - Separate database: `reading_question_bank.db` (gitignored, deletable/rebuildable)
 - Exactly 1 question per context
 - Schema stores `stem_family` (instead of WE's `grammar_topics`) and `has_signature`
-- Assembly ordering prioritizes `times_served` first (least-served passages surface before status tiers) — keeps variety high across repeated practice sessions
+- Assembly ordering: `times_served` ASC first (fresh material always surfaces before repeats — a passage only repeats once the whole bank has been cycled), then a single quality tier (`reviewed` > `battle_tested` > `warned` > user-flagged), then `RANDOM()` tiebreak. No stem-family balancing. The selected contexts are shuffled before numbering, so exam order is random rather than reflecting selection priority.
 
 ## Timer
 

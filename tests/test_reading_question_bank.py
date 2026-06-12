@@ -194,14 +194,14 @@ def test_assemble_increments_times_served():
         conn.close()
 
 
-def test_assemble_prefers_battle_tested_over_reviewed_over_warned():
+def test_assemble_prefers_reviewed_over_battle_tested_over_warned():
     from tools.reading_question_bank import init_db, cache_contexts, assemble_exam_from_cache
     init_db()
     cache_contexts(_exam([_ctx(1, "reviewed_p")]), status="reviewed")
     cache_contexts(_exam([_ctx(2, "battle_p")]), status="battle_tested")
     cache_contexts(_exam([_ctx(3, "warned_p")]), status="warned")
     result = assemble_exam_from_cache(1)
-    assert result["exam"]["contexts"][0]["passage"] == "battle_p"
+    assert result["exam"]["contexts"][0]["passage"] == "reviewed_p"
 
 
 def test_assemble_deprioritizes_user_flagged():
@@ -216,20 +216,52 @@ def test_assemble_deprioritizes_user_flagged():
     assert result["exam"]["contexts"][0]["passage"] == "clean_p"
 
 
-def test_assemble_spreads_across_stem_families():
+def test_assemble_times_served_beats_status():
+    import sqlite3
+    from tools.reading_question_bank import init_db, cache_contexts, assemble_exam_from_cache, DB_PATH
+    init_db()
+    cache_contexts(_exam([_ctx(1, "served_reviewed_p")]), status="reviewed")
+    cache_contexts(_exam([_ctx(2, "fresh_warned_p")]), status="warned")
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute("UPDATE rc_contexts SET times_served = 1 WHERE passage = 'served_reviewed_p'")
+        conn.commit()
+    finally:
+        conn.close()
+    result = assemble_exam_from_cache(1)
+    assert result["exam"]["contexts"][0]["passage"] == "fresh_warned_p"
+
+
+def test_assemble_rotates_through_bank_before_repeating():
     from tools.reading_question_bank import init_db, cache_contexts, assemble_exam_from_cache
     init_db()
-    families = [
-        ("main_idea", "P main 1"),
-        ("main_idea", "P main 2"),
-        ("title",     "P title"),
-        ("purpose",   "P purpose"),
-    ]
-    for i, (fam, p) in enumerate(families):
-        cache_contexts(_exam([_ctx(i + 1, p, q=_q(stem_family=fam, qid=i + 1))]))
-    result = assemble_exam_from_cache(3)
-    fams_used = [c["questions"][0]["stem_family"] for c in result["exam"]["contexts"]]
-    assert sorted(fams_used) == ["main_idea", "purpose", "title"]
+    for i in range(4):
+        cache_contexts(_exam([_ctx(i + 1, f"P{i + 1}")]))
+    first = {c["passage"] for c in assemble_exam_from_cache(2)["exam"]["contexts"]}
+    second = {c["passage"] for c in assemble_exam_from_cache(2)["exam"]["contexts"]}
+    assert first.isdisjoint(second)
+    assert first | second == {"P1", "P2", "P3", "P4"}
+
+
+def test_assemble_shuffles_final_exam_order(monkeypatch):
+    import sqlite3
+    import tools.reading_question_bank as rqb
+    from tools.reading_question_bank import init_db, cache_contexts, assemble_exam_from_cache, DB_PATH
+    init_db()
+    for i in range(3):
+        cache_contexts(_exam([_ctx(i + 1, f"P{i + 1}")]))
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        # Distinct times_served pins selection order to P1, P2, P3.
+        for i in range(3):
+            conn.execute("UPDATE rc_contexts SET times_served = ? WHERE passage = ?",
+                         (i, f"P{i + 1}"))
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.setattr(rqb.random, "shuffle", lambda seq: seq.reverse())
+    ordered = [c["passage"] for c in assemble_exam_from_cache(3)["exam"]["contexts"]]
+    assert ordered == ["P3", "P2", "P1"]
 
 
 def _eval_ctx(context_id, bank_context_id=None, original_passage_hash=None,

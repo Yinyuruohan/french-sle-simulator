@@ -9,6 +9,7 @@ single question_json dict).
 import hashlib
 import json
 import os
+import random
 import sqlite3
 import uuid
 from datetime import datetime
@@ -158,10 +159,11 @@ def lookup_context_ids_by_hashes(passage_hashes: list[str]) -> dict[str, str]:
 
 
 def assemble_exam_from_cache(num_questions: int) -> dict:
-    """Pick N contexts with even stem_family spread; renumber ids.
+    """Pick the N least-served contexts; shuffle them; renumber ids.
 
-    Ordering: user-flagged deprioritized → battle_tested > reviewed > warned →
-    times_served ASC, RANDOM().
+    Ordering: times_served ASC (fresh material first; repeats only once the
+    whole bank has been cycled) → reviewed > battle_tested > warned >
+    user-flagged → RANDOM() tiebreak. Final exam order is shuffled.
 
     Returns {available_questions: int, exam: dict|None}.
     """
@@ -176,13 +178,15 @@ def assemble_exam_from_cache(num_questions: int) -> dict:
             "stem_family, status, user_flags, passage_hash "
             "FROM rc_contexts "
             "ORDER BY "
-            "  CASE WHEN user_flags >= 1 THEN 1 ELSE 0 END, "
             "  times_served ASC, "
-            "  CASE status WHEN 'battle_tested' THEN 0 WHEN 'reviewed' THEN 1 WHEN 'warned' THEN 2 END, "
+            "  CASE WHEN user_flags >= 1 THEN 3 "
+            "       WHEN status = 'reviewed' THEN 0 "
+            "       WHEN status = 'battle_tested' THEN 1 "
+            "       WHEN status = 'warned' THEN 2 END, "
             "  RANDOM()"
         ).fetchall()
 
-        selected = _select_contexts_evenly(rows, num_questions)
+        selected = rows[:num_questions]
         if not selected:
             return {"available_questions": available, "exam": None}
 
@@ -195,33 +199,10 @@ def assemble_exam_from_cache(num_questions: int) -> dict:
     finally:
         conn.close()
 
+    selected = list(selected)
+    random.shuffle(selected)
     exam = _build_exam_from_rows(selected)
     return {"available_questions": available, "exam": exam}
-
-
-def _select_contexts_evenly(rows, target_questions: int) -> list:
-    """Greedy pick by least-represented stem_family, up to target. RC has 1 q per ctx."""
-    if not rows or target_questions <= 0:
-        return []
-
-    remaining = list(rows)
-    family_counts: dict[str, int] = {}
-    selected = []
-    while remaining and len(selected) < target_questions:
-        best = None
-        best_score = float("inf")
-        for row in remaining:
-            score = family_counts.get(row["stem_family"], 0)
-            if score < best_score:
-                best_score = score
-                best = row
-        if best is None:
-            break
-        selected.append(best)
-        family_counts[best["stem_family"]] = family_counts.get(best["stem_family"], 0) + 1
-        remaining.remove(best)
-
-    return selected
 
 
 def _build_exam_from_rows(rows: list) -> dict:
